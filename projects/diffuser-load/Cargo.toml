@@ -2,7 +2,9 @@
 name = "diffusers-load"
 version = "0.0.0"
 authors = ["Aster <192607617@qq.com>"]
-description = "..."
+description = "Load diffusers' weight from file."
+keywords = ["diffusers"]
+categories = ["machine-learning::diffusers"]
 repository = "https://github.com/oovm/sub_projects"
 documentation = "https://docs.rs/sub_projects"
 readme = "Readme.md"
@@ -11,6 +13,9 @@ edition = "2021"
 
 [dependencies]
 safetensors = "0.2.8"
+tch = "0.10.3"
+serde-pickle = "1.1.1"
+zip = "0.6.4"
 
 [dev-dependencies]
 

@@ -13,3 +13,7 @@ time-travel.*
 target/
 Cargo.lock
 *.safetensors
+*.bin
+*.pt
+*.pth
+*.pkl

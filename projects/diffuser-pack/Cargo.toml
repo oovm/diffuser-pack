@@ -1,8 +1,8 @@
 [package]
-name = "diffusers-load"
+name = "diffusers-pack"
 version = "0.0.0"
 authors = ["Aster <192607617@qq.com>"]
-description = "Load diffusers' weight from file."
+description = "Pack diffusers' weight to file."
 keywords = ["diffusers"]
 categories = ["machine-learning::diffusers"]
 repository = "https://github.com/oovm/sub_projects"
@@ -16,7 +16,8 @@ safetensors = "0.2.8"
 tch = "0.10.3"
 serde-pickle = "1.1.1"
 zip = "0.6.4"
-
+clap = "4.1.8"
+waifu-diffuser-types = "0.0.0"
 
 [dev-dependencies]
 

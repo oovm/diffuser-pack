@@ -1,5 +1,7 @@
-pub use crate::models::{all_models, AllModels, find_model};
+pub use crate::all_models_info::{AllModels, RequestAllModels};
+pub use crate::model_info::{ModelInfo, RequestModel};
 
-mod models;
-
+mod all_models_info;
+mod model_info;
+mod model_version;
 

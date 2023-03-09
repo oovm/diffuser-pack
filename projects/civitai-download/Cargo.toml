@@ -1,12 +1,12 @@
 [package]
 name = "civitai"
-version = "0.0.0"
+version = "0.1.1"
 authors = ["Aster <192607617@qq.com>"]
-description = "Load diffusers' weight from file."
+description = "Load models from civit ai."
 keywords = ["diffusers"]
-categories = ["machine-learning::diffusers"]
-repository = "https://github.com/oovm/sub_projects"
-documentation = "https://docs.rs/sub_projects"
+categories = ["web-programming::http-client"]
+repository = "https://github.com/oovm/diffuser-load"
+documentation = "https://docs.rs/civitai"
 readme = "Readme.md"
 license = "MPL-2.0"
 edition = "2021"

@@ -1,4 +1,4 @@
-use civitai::all_models;
+use civitai::{RequestAllModels, RequestModel};
 
 #[test]
 fn ready() {
@@ -7,6 +7,12 @@ fn ready() {
 
 #[tokio::test]
 async fn test_all() {
-    let models = all_models().await.unwrap();
+    let models = RequestAllModels::default().send().await.unwrap();
+    println!("{:#?}", models.next_page());
+}
+
+#[tokio::test]
+async fn test_model1() {
+    let models = RequestModel::new(1).send().await.unwrap();
     println!("{:#?}", models);
 }

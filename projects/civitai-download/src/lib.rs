@@ -9,3 +9,5 @@ pub use crate::{
 mod all_models_info;
 mod model_info;
 mod model_version;
+
+pub type CivitResult<T> = Result<T, trauma::Error>;

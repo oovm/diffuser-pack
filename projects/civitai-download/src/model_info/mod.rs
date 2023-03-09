@@ -1,8 +1,10 @@
 use trauma::download::Download;
 
-pub use self::model_one::ModelInfo;
+use crate::CivitResult;
 
-mod model_one;
+pub use self::defines::ModelInfo;
+
+mod defines;
 
 #[derive(Clone, Debug)]
 pub struct RequestModel {
@@ -16,8 +18,8 @@ impl RequestModel {
     /// Get the URL for this request
     ///
     /// <https://github.com/civitai/civitai/wiki/REST-API-Reference#get-apiv1modelsmodelid>
-    pub async fn send(&self) -> Result<ModelInfo, reqwest::Error> {
-        reqwest::get(self.url()).await?.json().await
+    pub async fn send(&self) -> CivitResult<ModelInfo> {
+        Ok(reqwest::get(self.url()).await?.json().await?)
     }
     pub fn url(&self) -> String {
         format!("https://civitai.com/api/v1/models/{}", self.id)
@@ -34,12 +36,10 @@ impl ModelInfo {
             None => "",
         }
     }
-    /// Download the primary model
-    ///
-    /// It creates a new download task and returns a handle to it.
+    /// Download the primary model, it creates a new download task
     ///
     /// Primary model is the latest model in the list
-    pub fn download(&self, local: &str) -> Result<Download, trauma::Error> {
+    pub fn download(&self, local: &str) -> CivitResult<Download> {
         let mut file_name = local;
         let download_link = match self.model_versions.first() {
             Some(s) => {

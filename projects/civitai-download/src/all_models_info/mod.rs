@@ -1,11 +1,18 @@
+use std::str::FromStr;
+
+use crate::CivitResult;
 use reqwest::Url;
 
 pub use self::defines::AllModels;
 
 mod defines;
 
+/// Get the next page of all_models_info
+///
+/// <https://github.com/civitai/civitai/wiki/REST-API-Reference#get-apiv1models>
 #[derive(Clone, Debug)]
 pub struct RequestAllModels {
+    /// The page from which to start fetching models
     pub page: usize,
 }
 
@@ -24,22 +31,22 @@ impl RequestAllModels {
         self.page = page;
         self
     }
-    /// Get the next page of all_models_info
-    ///
-    /// <https://github.com/civitai/civitai/wiki/REST-API-Reference#get-apiv1models>
-    pub async fn send(&self) -> Result<AllModels, reqwest::Error> {
-        reqwest::get(self.url()).await?.json().await
+    /// Send the request
+    pub async fn send(&self) -> CivitResult<AllModels> {
+        Ok(reqwest::get(self.url()).await?.json().await?)
     }
+    /// Get the url for the request
     pub fn url(&self) -> String {
         format!("https://civitai.com/api/v1/models?page={page}", page = self.page)
     }
 }
 
-impl AllModels {
-    /// Get the next page of all_models_info
-    pub fn next_page(&self) -> Result<RequestAllModels, reqwest::Error> {
+impl FromStr for RequestAllModels {
+    type Err = trauma::Error;
+
+    fn from_str(s: &str) -> CivitResult<Self> {
         let mut out = RequestAllModels::default();
-        match Url::parse(&self.metadata.next_page) {
+        match Url::parse(s) {
             Ok(o) => {
                 for (key, value) in o.query_pairs() {
                     match key.as_ref() {
@@ -53,10 +60,15 @@ impl AllModels {
                     }
                 }
             }
-            Err(_) => {
-                todo!()
-            }
+            Err(e) => Err(trauma::Error::InvalidUrl(e.to_string()))?,
         }
         Ok(out)
+    }
+}
+
+impl AllModels {
+    /// Get the next page of all_models_info
+    pub fn next_page(&self) -> CivitResult<RequestAllModels> {
+        RequestAllModels::from_str(&self.metadata.next_page)
     }
 }

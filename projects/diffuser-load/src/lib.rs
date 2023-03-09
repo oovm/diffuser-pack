@@ -23,10 +23,3 @@ fn load_safe_tensors() {
     println!("{:#?}", body.names());
     // println!("{:#?}", tnesor.names());
 }
-
-#[test]
-fn test2() {
-    let cm = tch::CModule::load("pureerosface_v1.pt").unwrap();
-
-    println!("{:#?}", cm.named_parameters());
-}

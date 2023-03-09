@@ -13,7 +13,7 @@ edition = "2021"
 
 [dependencies]
 safetensors = "0.2.8"
-tch = "0.10.3"
+#tch = "0.10.3"
 serde-pickle = "1.1.1"
 zip = "0.6.4"
 

@@ -1,4 +1,4 @@
-use std::path::Path;
+use trauma::download::Download;
 
 pub use self::model_one::ModelInfo;
 
@@ -36,12 +36,22 @@ impl ModelInfo {
     }
     /// Download the primary model
     ///
+    /// It creates a new download task and returns a handle to it.
+    ///
     /// Primary model is the latest model in the list
-    pub fn download(&self, local: &Path) -> Result<(), reqwest::Error> {
-        todo!()
-        // let mut resp = reqwest::get(self.download_link())?;
-        // let mut out = std::fs::File::create(format!("{}.zip", self.name))?;
-        // std::io::copy(&mut resp, &mut out)?;
-        // Ok(())
+    pub fn download(&self, local: &str) -> Result<Download, trauma::Error> {
+        let mut file_name = local;
+        let download_link = match self.model_versions.first() {
+            Some(s) => {
+                if file_name.is_empty() {
+                    file_name = s.name.as_str()
+                }
+                s.download_url.as_str()
+            }
+            None => Err(trauma::Error::InvalidUrl("Missing download link".to_string()))?,
+        };
+        let mut task = Download::try_from(download_link)?;
+        task.filename = file_name.to_string();
+        Ok(task)
     }
 }

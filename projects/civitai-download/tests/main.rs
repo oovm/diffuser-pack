@@ -1,7 +1,7 @@
-use curl::easy::Easy;
+use std::path::PathBuf;
 
 use civitai::{RequestAllModels, RequestModel};
-use std::io::Read;
+use trauma::{download::Download, downloader::DownloaderBuilder, Error};
 
 #[test]
 fn ready() {
@@ -20,16 +20,11 @@ async fn test_model1() {
     println!("{:#?}", models);
 }
 
-#[test]
-fn main() {
-    let mut data = "this is the body".as_bytes();
-
-    let mut easy = Easy::new();
-    easy.url("http://www.example.com/upload").unwrap();
-    easy.post(true).unwrap();
-    easy.post_field_size(data.len() as u64).unwrap();
-
-    let mut transfer = easy.transfer();
-    transfer.read_function(|buf| Ok(data.read(buf).unwrap_or(0))).unwrap();
-    transfer.perform().unwrap();
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let reqwest_rs = "https://github.com/seanmonstar/reqwest/archive/refs/tags/v0.11.9.zip";
+    let downloads = vec![Download::try_from(reqwest_rs).unwrap()];
+    let downloader = DownloaderBuilder::new().directory(PathBuf::from("output")).build();
+    downloader.download(&downloads).await;
+    Ok(())
 }

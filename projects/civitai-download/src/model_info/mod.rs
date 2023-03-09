@@ -6,21 +6,24 @@ pub use self::defines::ModelInfo;
 
 mod defines;
 
+/// Get the information from model id
+///
+/// <https://github.com/civitai/civitai/wiki/REST-API-Reference#get-apiv1modelsmodelid>
 #[derive(Clone, Debug)]
 pub struct RequestModel {
     pub id: usize,
 }
 
 impl RequestModel {
+    /// Create a new request by model id
     pub fn new(id: usize) -> Self {
         Self { id }
     }
-    /// Get the URL for this request
-    ///
-    /// <https://github.com/civitai/civitai/wiki/REST-API-Reference#get-apiv1modelsmodelid>
+    /// Send the request
     pub async fn send(&self) -> CivitResult<ModelInfo> {
         Ok(reqwest::get(self.url()).await?.json().await?)
     }
+    /// Get the url for the request
     pub fn url(&self) -> String {
         format!("https://civitai.com/api/v1/models/{}", self.id)
     }

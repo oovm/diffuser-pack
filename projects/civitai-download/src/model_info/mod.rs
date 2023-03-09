@@ -1,3 +1,5 @@
+use std::path::Path;
+
 pub use self::model_one::ModelInfo;
 
 mod model_one;
@@ -9,9 +11,7 @@ pub struct RequestModel {
 
 impl RequestModel {
     pub fn new(id: usize) -> Self {
-        Self {
-            id,
-        }
+        Self { id }
     }
     /// Get the URL for this request
     ///
@@ -21,5 +21,27 @@ impl RequestModel {
     }
     pub fn url(&self) -> String {
         format!("https://civitai.com/api/v1/models/{}", self.id)
+    }
+}
+
+impl ModelInfo {
+    /// Get the primary download link for this model
+    ///
+    /// Primary model is the latest model in the list
+    pub fn download_link(&self) -> &str {
+        match self.model_versions.first() {
+            Some(s) => s.download_url.as_str(),
+            None => "",
+        }
+    }
+    /// Download the primary model
+    ///
+    /// Primary model is the latest model in the list
+    pub fn download(&self, local: &Path) -> Result<(), reqwest::Error> {
+        todo!()
+        // let mut resp = reqwest::get(self.download_link())?;
+        // let mut out = std::fs::File::create(format!("{}.zip", self.name))?;
+        // std::io::copy(&mut resp, &mut out)?;
+        // Ok(())
     }
 }

@@ -9,16 +9,17 @@ pub struct RequestAllModels {
     pub page: usize,
 }
 
-
 impl Default for RequestAllModels {
     fn default() -> Self {
-        Self {
-            page: 1,
-        }
+        Self { page: 1 }
     }
 }
 
 impl RequestAllModels {
+    pub fn new(page: usize) -> Self {
+        Self { page, ..Default::default() }
+    }
+
     pub fn with_page(mut self, page: usize) -> Self {
         self.page = page;
         self
@@ -34,7 +35,6 @@ impl RequestAllModels {
     }
 }
 
-
 impl AllModels {
     /// Get the next page of all_models_info
     pub fn next_page(&self) -> Result<RequestAllModels, reqwest::Error> {
@@ -43,12 +43,10 @@ impl AllModels {
             Ok(o) => {
                 for (key, value) in o.query_pairs() {
                     match key.as_ref() {
-                        "page" => {
-                            match value.parse() {
-                                Ok(o) => out.page = o,
-                                Err(_) => {}
-                            }
-                        }
+                        "page" => match value.parse() {
+                            Ok(o) => out.page = o,
+                            Err(_) => {}
+                        },
                         _ => {
                             println!("Unknown key: {} => {}", key, value);
                         }
@@ -62,4 +60,3 @@ impl AllModels {
         Ok(out)
     }
 }
-

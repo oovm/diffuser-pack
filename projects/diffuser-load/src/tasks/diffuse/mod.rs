@@ -1,8 +1,9 @@
 use std::fmt::Formatter;
+use std::num::NonZeroUsize;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Visitor;
 use serde::ser::SerializeStruct;
-use crate::StableDiffusionVersion;
+use crate::ModelVersion;
 
 mod ser;
 mod der;
@@ -14,17 +15,9 @@ pub struct DiffuseTask {
     pub prompt_positive: String,
     pub prompt_negative: String,
     /// The height in pixels of the generated image.
-    pub height: Option<usize>,
+    pub height: usize,
     /// The width in pixels of the generated image.
-    pub width: Option<usize>,
-    /// The UNet weight file, in `.safetensors` format.
-    pub unet_weights: Option<String>,
-    /// The CLIP weight file, in `.safetensors` format.
-    pub clip_weights: Option<String>,
-    /// The VAE weight file, in `.safetensors` format.
-    pub vae_weights: Option<String>,
-    /// The file specifying the tokenizer to used for tokenization.
-    pub tokenizer: Option<String>,
+    pub width: usize,
     /// The size of the sliced attention or 0 for automatic slicing (disabled by default)
     pub sliced_attention_size: Option<usize>,
     /// The number of steps to run the diffusion for.
@@ -32,10 +25,10 @@ pub struct DiffuseTask {
     /// The number of samples to generate iteratively.
     pub num_samples: usize,
     /// The numbers of samples to generate simultaneously.
-    pub batch_size: usize,
+    pub batch_size: NonZeroUsize,
     /// The name of the final image to generate.
     pub final_image: String,
-    pub sd_version: StableDiffusionVersion,
+    pub sd_version: ModelVersion,
     /// Generate intermediary images at each step.
     pub intermediary_images: bool,
     pub use_flash_attn: bool,
@@ -50,23 +43,23 @@ pub struct DiffuseTask {
     pub seed: Option<u64>,
 }
 
+const NON_ZERO_ONE: NonZeroUsize = unsafe {
+    NonZeroUsize::new_unchecked(1)
+};
+
 impl Default for DiffuseTask {
     fn default() -> Self {
         Self {
             prompt_positive: "".to_string(),
             prompt_negative: "".to_string(),
-            height: None,
-            width: None,
-            unet_weights: None,
-            clip_weights: None,
-            vae_weights: None,
-            tokenizer: None,
+            height: 512,
+            width: 512,
             sliced_attention_size: None,
             n_steps: None,
-            num_samples: 0,
-            batch_size: 0,
-            final_image: "".to_string(),
-            sd_version: StableDiffusionVersion::V1_5,
+            num_samples: 1,
+            batch_size: NON_ZERO_ONE,
+            final_image: "test.png".to_string(),
+            sd_version: ModelVersion::V1_5,
             intermediary_images: false,
             use_flash_attn: false,
             use_f16: false,
@@ -77,3 +70,4 @@ impl Default for DiffuseTask {
         }
     }
 }
+

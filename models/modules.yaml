@@ -1,10 +1,14 @@
 models:
-  standard-v1.5:
-    version: V2
-    available: true
+  standard-v1.5-f32:
+    version: V1_5
+    tokenizer: standard-v1.5-tokenizer
+    clip: standard-v1.5-clip
+    unet: standard-v1.5-unet-f32
+    vae: standard-v1.5-vae-f32
+    available: false
   standard-v2.1:
     version: V1
-    available: true
+    available: false
 weights:
   standard-v1.5-tokenizer:
     remote: https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/tokenizer.json
@@ -18,8 +22,6 @@ weights:
   standard-v1.5-unet-f32:
     remote:  https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/vae/diffusion_pytorch_model.safetensors
     local: standard-v1.5-vae-f32.safetensors
-
-
   tokenizer-xl-part1:
     remote: https://huggingface.co/openai/clip-vit-large-patch14/resolve/main/tokenizer.json
     local: standard-tokenizer.xl-part1.json

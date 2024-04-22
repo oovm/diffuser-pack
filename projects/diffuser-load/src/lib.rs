@@ -6,9 +6,11 @@ use candle_transformers::models::stable_diffusion;
 use anyhow::{Error as E, Result};
 use candle_core::{DType, Device, IndexOp, Module, Tensor, D};
 use candle_core::utils::{cuda_is_available, metal_is_available};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use stable_diffusion::vae::AutoEncoderKL;
 use tokenizers::Tokenizer;
+use diffuser_error::ModelVersion;
 
 mod tasks;
 
@@ -41,7 +43,7 @@ pub struct DiffuserTaskRunner {
     pub batch_size: usize,
     /// The name of the final image to generate.
     pub final_image: String,
-    pub sd_version: StableDiffusionVersion,
+    pub sd_version: ModelVersion,
     /// Generate intermediary images at each step.
     pub intermediary_images: bool,
     pub use_flash_attn: bool,
@@ -56,14 +58,8 @@ pub struct DiffuserTaskRunner {
     pub seed: Option<u64>,
 }
 
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StableDiffusionVersion {
-    V1_5,
-    V2_1,
-    XL,
-    XL_Turbo,
-}
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelFile {
@@ -75,128 +71,65 @@ pub enum ModelFile {
     Vae,
 }
 
-impl StableDiffusionVersion {
-    fn repo(&self) -> &'static str {
-        match self {
-            Self::XL => "stabilityai/stable-diffusion-xl-base-1.0",
-            Self::V2_1 => "stabilityai/stable-diffusion-2-1",
-            Self::V1_5 => "runwayml/stable-diffusion-v1-5",
-            Self::XL_Turbo => "stabilityai/sdxl-turbo",
-        }
-    }
 
-    fn unet_file(&self, use_f16: bool) -> &'static str {
-        match self {
-            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
-                if use_f16 {
-                    "unet/diffusion_pytorch_model.fp16.safetensors"
-                } else {
-                    "unet/diffusion_pytorch_model.safetensors"
-                }
-            }
-        }
-    }
-
-    fn vae_file(&self, use_f16: bool) -> &'static str {
-        match self {
-            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
-                if use_f16 {
-                    "vae/diffusion_pytorch_model.fp16.safetensors"
-                } else {
-                    "vae/diffusion_pytorch_model.safetensors"
-                }
-            }
-        }
-    }
-
-    fn clip_file(&self, use_f16: bool) -> &'static str {
-        match self {
-            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
-                if use_f16 {
-                    "text_encoder/model.fp16.safetensors"
-                } else {
-                    "text_encoder/model.safetensors"
-                }
-            }
-        }
-    }
-
-    fn clip2_file(&self, use_f16: bool) -> &'static str {
-        match self {
-            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
-                if use_f16 {
-                    "text_encoder_2/model.fp16.safetensors"
-                } else {
-                    "text_encoder_2/model.safetensors"
-                }
-            }
-        }
-    }
-}
 
 impl ModelFile {
     fn get(
         &self,
-        filename: Option<String>,
-        version: StableDiffusionVersion,
+        version: ModelVersion,
         use_f16: bool,
     ) -> Result<std::path::PathBuf> {
         let here = current_dir()?.join("models");
         use hf_hub::api::sync::Api;
-        match filename {
-            Some(filename) => Ok(std::path::PathBuf::from(filename)),
-            None => {
-                let (repo, path) = match self {
-                    Self::Tokenizer => {
-                        let tokenizer_repo = match version {
-                            StableDiffusionVersion::V1_5 => {
-                                return Ok(here.join("standard-v1.5-tokenizer.json"));
-                            }
-                            StableDiffusionVersion::V2_1 => {
-                                "openai/clip-vit-base-patch32"
-                            }
-                            StableDiffusionVersion::XL => {
-                                "openai/clip-vit-large-patch14"
-                            }
-                            StableDiffusionVersion::XL_Turbo => {
-                                "openai/clip-vit-large-patch14"
-                            }
-                        };
-                        (tokenizer_repo, "tokenizer.json")
+        let (repo, path) = match self {
+            Self::Tokenizer => {
+                let tokenizer_repo = match version {
+                    ModelVersion::V1_5 => {
+                        return Ok(here.join("standard-v1.5-tokenizer.json"));
                     }
-                    Self::Tokenizer2 => {
-                        ("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", "tokenizer.json")
+                    ModelVersion::V2_1 => {
+                        "openai/clip-vit-base-patch32"
                     }
-                    Self::Clip => match version {
-                        StableDiffusionVersion::V1_5 => { return Ok(here.join("standard-v1.5-clip.safetensors")); }
-                        StableDiffusionVersion::V2_1 => { (version.repo(), version.clip_file(use_f16)) }
-                        StableDiffusionVersion::XL => { (version.repo(), version.clip_file(use_f16)) }
-                        StableDiffusionVersion::XL_Turbo => { (version.repo(), version.clip_file(use_f16)) }
-                    },
-                    Self::Clip2 => (version.repo(), version.clip2_file(use_f16)),
-                    Self::Unet => match version {
-                        StableDiffusionVersion::V1_5 => { return Ok(here.join("standard-v1.5-unet-f32.safetensors")); }
-                        StableDiffusionVersion::V2_1 => { (version.repo(), version.unet_file(use_f16)) }
-                        StableDiffusionVersion::XL => { (version.repo(), version.unet_file(use_f16)) }
-                        StableDiffusionVersion::XL_Turbo => { (version.repo(), version.unet_file(use_f16)) }
-                    },
-                    Self::Vae => {
-                        // Override for SDXL when using f16 weights.
-                        // See https://github.com/huggingface/candle/issues/1060
-                        match version {
-                            StableDiffusionVersion::V1_5 => { return Ok(here.join("standard-v1.5-vae-f32.safetensors")); }
-                            StableDiffusionVersion::XL | StableDiffusionVersion::XL_Turbo => (
-                                "madebyollin/sdxl-vae-fp16-fix",
-                                "diffusion_pytorch_model.safetensors",
-                            ),
-                            _ => (version.repo(), version.vae_file(use_f16))
-                        }
+                    ModelVersion::XL => {
+                        "openai/clip-vit-large-patch14"
+                    }
+                    ModelVersion::XL_Turbo => {
+                        "openai/clip-vit-large-patch14"
                     }
                 };
-                let filename = Api::new()?.model(repo.to_string()).get(path)?;
-                Ok(filename)
+                (tokenizer_repo, "tokenizer.json")
             }
-        }
+            Self::Tokenizer2 => {
+                ("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", "tokenizer.json")
+            }
+            Self::Clip => match version {
+                ModelVersion::V1_5 => { return Ok(here.join("standard-v1.5-clip.safetensors")); }
+                ModelVersion::V2_1 => { (version.repo(), version.clip_file(use_f16)) }
+                ModelVersion::XL => { (version.repo(), version.clip_file(use_f16)) }
+                ModelVersion::XL_Turbo => { (version.repo(), version.clip_file(use_f16)) }
+            },
+            Self::Clip2 => (version.repo(), version.clip2_file(use_f16)),
+            Self::Unet => match version {
+                ModelVersion::V1_5 => { return Ok(here.join("standard-v1.5-unet-f32.safetensors")); }
+                ModelVersion::V2_1 => { (version.repo(), version.unet_file(use_f16)) }
+                ModelVersion::XL => { (version.repo(), version.unet_file(use_f16)) }
+                ModelVersion::XL_Turbo => { (version.repo(), version.unet_file(use_f16)) }
+            },
+            Self::Vae => {
+                // Override for SDXL when using f16 weights.
+                // See https://github.com/huggingface/candle/issues/1060
+                match version {
+                    ModelVersion::V1_5 => { return Ok(here.join("standard-v1.5-vae-f32.safetensors")); }
+                    ModelVersion::XL | ModelVersion::XL_Turbo => (
+                        "madebyollin/sdxl-vae-fp16-fix",
+                        "diffusion_pytorch_model.safetensors",
+                    ),
+                    _ => (version.repo(), version.vae_file(use_f16))
+                }
+            }
+        };
+        let filename = Api::new()?.model(repo.to_string()).get(path)?;
+        Ok(filename)
     }
 }
 
@@ -275,9 +208,7 @@ pub fn save_image2<P: AsRef<std::path::Path>>(img: &Tensor, p: P) -> anyhow::Res
 fn text_embeddings(
     prompt: &str,
     uncond_prompt: &str,
-    tokenizer: Option<String>,
-    clip_weights: Option<String>,
-    sd_version: StableDiffusionVersion,
+    sd_version: ModelVersion,
     sd_config: &stable_diffusion::StableDiffusionConfig,
     use_f16: bool,
     device: &Device,
@@ -290,7 +221,7 @@ fn text_embeddings(
     } else {
         ModelFile::Tokenizer2
     };
-    let tokenizer = tokenizer_file.get(tokenizer, sd_version, use_f16)?;
+    let tokenizer = tokenizer_file.get(sd_version, use_f16)?;
     let tokenizer = Tokenizer::from_file(tokenizer).map_err(E::msg)?;
     let pad_id = match &sd_config.clip.pad_with {
         Some(padding) => *tokenizer.get_vocab(true).get(padding.as_str()).unwrap(),
@@ -320,7 +251,7 @@ fn text_embeddings(
     } else {
         ModelFile::Clip2
     };
-    let clip_weights = clip_weights_file.get(clip_weights, sd_version, false)?;
+    let clip_weights = clip_weights_file.get(sd_version, false)?;
     let clip_config = if first {
         &sd_config.clip
     } else {
@@ -406,15 +337,11 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         height,
         width,
         n_steps,
-        tokenizer,
         final_image,
         sliced_attention_size,
         num_samples,
-        batch_size: bsize,
+        batch_size,
         sd_version,
-        clip_weights,
-        vae_weights,
-        unet_weights,
         use_f16,
         guidance_scale,
         use_flash_attn,
@@ -423,6 +350,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         seed,
         ..
     } = args;
+    let bsize = batch_size.get();
 
     if !(0.0..=1.0).contains(&img2img_strength) {
         anyhow::bail!("img2img-strength should be between 0 and 1, got {img2img_strength}")
@@ -431,36 +359,36 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     let guidance_scale = match guidance_scale {
         Some(guidance_scale) => guidance_scale,
         None => match sd_version {
-            StableDiffusionVersion::V1_5 => 7.5,
-            StableDiffusionVersion::V2_1 => 7.5,
-            StableDiffusionVersion::XL => 7.5,
-            StableDiffusionVersion::XL_Turbo => 0.,
+            ModelVersion::V1_5 => 7.5,
+            ModelVersion::V2_1 => 7.5,
+            ModelVersion::XL => 7.5,
+            ModelVersion::XL_Turbo => 0.,
         },
     };
     let n_steps = match n_steps {
         Some(n_steps) => n_steps,
         None => match sd_version {
-            StableDiffusionVersion::V1_5 => 30,
-            StableDiffusionVersion::V2_1 => 30,
-            StableDiffusionVersion::XL => 30,
-            StableDiffusionVersion::XL_Turbo => 1,
+            ModelVersion::V1_5 => 30,
+            ModelVersion::V2_1 => 30,
+            ModelVersion::XL => 30,
+            ModelVersion::XL_Turbo => 1,
         },
     };
     let dtype = if use_f16 { DType::F16 } else { DType::F32 };
     let sd_config = match sd_version {
-        StableDiffusionVersion::V1_5 => {
-            stable_diffusion::StableDiffusionConfig::v1_5(sliced_attention_size, height, width)
+        ModelVersion::V1_5 => {
+            stable_diffusion::StableDiffusionConfig::v1_5(sliced_attention_size, Some(height), Some(width))
         }
-        StableDiffusionVersion::V2_1 => {
-            stable_diffusion::StableDiffusionConfig::v2_1(sliced_attention_size, height, width)
+        ModelVersion::V2_1 => {
+            stable_diffusion::StableDiffusionConfig::v2_1(sliced_attention_size, Some(height), Some(width))
         }
-        StableDiffusionVersion::XL => {
-            stable_diffusion::StableDiffusionConfig::sdxl(sliced_attention_size, height, width)
+        ModelVersion::XL => {
+            stable_diffusion::StableDiffusionConfig::sdxl(sliced_attention_size, Some(height), Some(width))
         }
-        StableDiffusionVersion::XL_Turbo => stable_diffusion::StableDiffusionConfig::sdxl_turbo(
+        ModelVersion::XL_Turbo => stable_diffusion::StableDiffusionConfig::sdxl_turbo(
             sliced_attention_size,
-            height,
-            width,
+            Some(height),
+            Some(width),
         ),
     };
 
@@ -472,7 +400,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     let use_guide_scale = guidance_scale > 1.0;
 
     let which = match sd_version {
-        StableDiffusionVersion::XL | StableDiffusionVersion::XL_Turbo => vec![true, false],
+        ModelVersion::XL | ModelVersion::XL_Turbo => vec![true, false],
         _ => vec![true],
     };
     let text_embeddings = which
@@ -481,8 +409,6 @@ pub fn run(args: DiffuseTask) -> Result<()> {
             text_embeddings(
                 &prompt,
                 &uncond_prompt,
-                tokenizer.clone(),
-                clip_weights.clone(),
                 sd_version,
                 &sd_config,
                 use_f16,
@@ -499,7 +425,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     println!("{text_embeddings:?}");
 
     println!("Building the autoencoder.");
-    let vae_weights = ModelFile::Vae.get(vae_weights, sd_version, use_f16)?;
+    let vae_weights = ModelFile::Vae.get(sd_version, use_f16)?;
     let vae = sd_config.build_vae(vae_weights, &device, dtype)?;
     let init_latent_dist = match &img2img {
         None => None,
@@ -509,7 +435,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         }
     };
     println!("Building the unet.");
-    let unet_weights = ModelFile::Unet.get(unet_weights, sd_version, use_f16)?;
+    let unet_weights = ModelFile::Unet.get(sd_version, use_f16)?;
     let unet = sd_config.build_unet(unet_weights, &device, 4, use_flash_attn, dtype)?;
 
     let t_start = if img2img.is_some() {
@@ -519,10 +445,10 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     };
 
     let vae_scale = match sd_version {
-        StableDiffusionVersion::V1_5
-        | StableDiffusionVersion::V2_1
-        | StableDiffusionVersion::XL => 0.18215,
-        StableDiffusionVersion::XL_Turbo => 0.13025,
+        ModelVersion::V1_5
+        | ModelVersion::V2_1
+        | ModelVersion::XL => 0.18215,
+        ModelVersion::XL_Turbo => 0.13025,
     };
 
     for idx in 0..num_samples {

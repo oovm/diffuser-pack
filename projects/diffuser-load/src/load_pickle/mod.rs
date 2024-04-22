@@ -1,15 +1,12 @@
-use std::fs::{File};
 use safetensors::tensor::{SafeTensorError, SafeTensors};
-use serde_pickle::{DeOptions, value_from_reader};
-use std::path::Path;
-
+use serde_pickle::{value_from_reader, DeOptions};
+use std::{fs::File, path::Path};
 
 #[test]
 fn test_load() {
     let path = "pureerosface_v1.pt";
     load_pth(&Path::new(path)).unwrap();
 }
-
 
 pub fn load_pth(path: &Path) -> Result<SafeTensors, SafeTensorError> {
     let mut zip = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();

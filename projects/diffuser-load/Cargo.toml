@@ -12,11 +12,12 @@ license = "MPL-2.0"
 edition = "2021"
 
 [dependencies]
-safetensors = "0.2.8"
+url = "2.5.0"
+serde = "1.0.198"
+safetensors = "0.4.3"
 #tch = "0.10.3"
 serde-pickle = "1.1.1"
-zip = "0.6.4"
-
+json5 = "0.4.1"
 
 [dev-dependencies]
 

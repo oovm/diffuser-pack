@@ -2,10 +2,11 @@
 name = "diffuser-error"
 version = "0.0.0"
 authors = ["Aster <192607617@qq.com>"]
-description = "Load diffusers' weight from file."
+description = "Shared diffusers' errors."
 keywords = ["diffusers"]
 categories = ["machine-learning::diffusers"]
-repository = "https://github.com/oovm/sub_projects"
+homepage = "https://github.com/oovm/diffuser-webui.rs"
+repository = "https://github.com/oovm/diffuser-webui.rs/tree/dev/projects/diffuser-errors"
 documentation = "https://docs.rs/diffuser-error"
 readme = "readme.md"
 license = "MPL-2.0"
@@ -13,7 +14,6 @@ edition = "2021"
 
 [dependencies]
 url = "2.5.0"
-
 
 [dev-dependencies]
 

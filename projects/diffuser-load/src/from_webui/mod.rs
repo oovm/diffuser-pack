@@ -103,7 +103,6 @@ impl WebUILayerMapping {
             self.vae_conversion_map.insert(sd_mid_res_prefix, hf_mid_res_prefix);
         }
     }
-
 }
 
 #[test]

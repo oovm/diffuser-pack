@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::path::PathBuf;
 
+
 use url::Url;
 
 mod missing_part;
@@ -12,11 +13,14 @@ pub struct DiffuserError {
     kind: Box<DiffuserErrorKind>,
 }
 
-#[derive(Debug)]
+
 pub enum DiffuserErrorKind {
     MissingPart(MissingPartError),
     CustomError(String),
 }
+
+
+
 #[derive(Debug)]
 pub struct MissingPartError {
     part: MissingPartKind,
@@ -45,11 +49,26 @@ impl Display for DiffuserError {
 impl Error for DiffuserErrorKind {
 
 }
-
+impl Debug for DiffuserErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingPart(e) => {Debug::fmt(e, f)}
+            Self::CustomError(e) => {
+                f.write_str(e)
+            }
+        }
+    }
+}
 
 impl Display for DiffuserErrorKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(self, f)
+        match self {
+            Self::MissingPart(e) => {Debug::fmt(e, f)}
+            Self::CustomError(e) => {
+                f.write_str(e)
+                
+            }
+        }
     }
 }
 

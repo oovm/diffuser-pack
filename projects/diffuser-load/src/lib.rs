@@ -6,6 +6,7 @@ use candle_core::{
 use candle_transformers::models::{stable_diffusion, stable_diffusion::unet_2d::UNet2DConditionModel};
 use serde::de::value::Error;
 
+use candle_transformers::models::stable_diffusion::clip::ClipTextTransformer;
 use stable_diffusion::StableDiffusionConfig;
 use std::{
     env::current_dir,
@@ -13,7 +14,7 @@ use std::{
 };
 
 use crate::helpers::detect_device;
-use diffuser_error::{DiffuserError, ModelStorage, ModelVersion};
+use diffuser_error::{DiffuserError, DiffuserTokenizer, ModelStorage, ModelVersion};
 use stable_diffusion::vae::AutoEncoderKL;
 use tokenizers::Tokenizer;
 
@@ -83,111 +84,48 @@ pub fn save_image_raw(img: &Tensor, path: &Path) -> Result<(), DiffuserError> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn text_embeddings1(
+fn text_embeddings(
     prompt: &str,
     uncond_prompt: &str,
-    tokenizer: &Path,
-    clip_weights: &Path,
+    runner: &DiffuserTokenizer,
     sd_config: &StableDiffusionConfig,
-    dtype: DType,
     use_guide_scale: bool,
-) -> Result<Tensor> {
+) -> Result<Tensor, DiffuserError> {
     let device = detect_device()?;
-    let tokenizer = Tokenizer::from_file(tokenizer).map_err(E::msg)?;
-    let pad_id = match &sd_config.clip.pad_with {
-        Some(padding) => *tokenizer.get_vocab(true).get(padding.as_str()).unwrap(),
-        None => *tokenizer.get_vocab(true).get("<|endoftext|>").unwrap(),
-    };
+    let pad_id = runner.pad_token(sd_config);
+    let mut positive_tokens = runner.encode_token(prompt)?;
+
     println!("Running with prompt \"{prompt}\".");
-    let mut tokens = tokenizer.encode(prompt, true).map_err(E::msg)?.get_ids().to_vec();
-    if tokens.len() > sd_config.clip.max_position_embeddings {
-        anyhow::bail!("the prompt is too long, {} > max-tokens ({})", tokens.len(), sd_config.clip.max_position_embeddings)
+    if positive_tokens.len() > sd_config.clip.max_position_embeddings {
+        tracing::warn!("提示词过多, 最多 {} 个, 当前 {} 个", sd_config.clip.max_position_embeddings, positive_tokens.len());
+        positive_tokens.truncate(sd_config.clip.max_position_embeddings);
+
     }
-    while tokens.len() < sd_config.clip.max_position_embeddings {
-        tokens.push(pad_id)
+    while positive_tokens.len() < sd_config.clip.max_position_embeddings {
+        positive_tokens.push(pad_id)
     }
-    let tokens = Tensor::new(tokens.as_slice(), &device)?.unsqueeze(0)?;
+    let tokens = Tensor::new(positive_tokens.as_slice(), &device)?.unsqueeze(0)?;
 
     println!("Building the Clip transformer.");
-    let clip_config = &sd_config.clip;
-    let text_model = stable_diffusion::build_clip_transformer(clip_config, clip_weights, &device, dtype)?;
-    let text_embeddings = text_model.forward(&tokens)?;
+    let text_embeddings = runner.clip.forward(&tokens)?;
 
     let text_embeddings = if use_guide_scale {
-        let mut uncond_tokens = tokenizer.encode(uncond_prompt, true).map_err(E::msg)?.get_ids().to_vec();
-        if uncond_tokens.len() > sd_config.clip.max_position_embeddings {
-            anyhow::bail!(
-                "the negative prompt is too long, {} > max-tokens ({})",
-                uncond_tokens.len(),
-                sd_config.clip.max_position_embeddings
-            )
+        let mut negative_token = runner.encode_token(uncond_prompt)?;
+        if negative_token.len() > sd_config.clip.max_position_embeddings {
+            tracing::warn!("提示词过多, 最多 {} 个, 当前 {} 个", sd_config.clip.max_position_embeddings, negative_token.len());
+            positive_tokens.truncate(sd_config.clip.max_position_embeddings);
         }
-        while uncond_tokens.len() < sd_config.clip.max_position_embeddings {
-            uncond_tokens.push(pad_id)
+        while negative_token.len() < sd_config.clip.max_position_embeddings {
+            negative_token.push(pad_id)
         }
 
-        let uncond_tokens = Tensor::new(uncond_tokens.as_slice(), &device)?.unsqueeze(0)?;
-        let uncond_embeddings = text_model.forward(&uncond_tokens)?;
+        let uncond_tokens = Tensor::new(negative_token.as_slice(), &device)?.unsqueeze(0)?;
+        let uncond_embeddings = runner.clip.forward(&uncond_tokens)?;
 
-        Tensor::cat(&[uncond_embeddings, text_embeddings], 0)?.to_dtype(dtype)?
+        Tensor::cat(&[uncond_embeddings, text_embeddings], 0)?.to_dtype(runner.data_type)?
     }
     else {
-        text_embeddings.to_dtype(dtype)?
-    };
-    Ok(text_embeddings)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn text_embeddings2(
-    prompt: &str,
-    uncond_prompt: &str,
-    clip2: &Path,
-    tokenizer2: &Path,
-    sd_config: &StableDiffusionConfig,
-    dtype: DType,
-    use_guide_scale: bool,
-) -> Result<Tensor> {
-    let device = detect_device()?;
-    let tokenizer = Tokenizer::from_file(tokenizer2).map_err(E::msg)?;
-    let pad_id = match &sd_config.clip.pad_with {
-        Some(padding) => *tokenizer.get_vocab(true).get(padding.as_str()).unwrap(),
-        None => *tokenizer.get_vocab(true).get("<|endoftext|>").unwrap(),
-    };
-    println!("Running with prompt \"{prompt}\".");
-    let mut tokens = tokenizer.encode(prompt, true).map_err(E::msg)?.get_ids().to_vec();
-    if tokens.len() > sd_config.clip.max_position_embeddings {
-        anyhow::bail!("the prompt is too long, {} > max-tokens ({})", tokens.len(), sd_config.clip.max_position_embeddings)
-    }
-    while tokens.len() < sd_config.clip.max_position_embeddings {
-        tokens.push(pad_id)
-    }
-    let tokens = Tensor::new(tokens.as_slice(), &device)?.unsqueeze(0)?;
-
-    println!("Building the Clip transformer.");
-    let clip_config = unsafe { sd_config.clip2.as_ref().unwrap_unchecked() };
-    let text_model = stable_diffusion::build_clip_transformer(clip_config, clip2, &device, dtype)?;
-    let text_embeddings = text_model.forward(&tokens)?;
-
-    let text_embeddings = if use_guide_scale {
-        let mut uncond_tokens = tokenizer.encode(uncond_prompt, true).map_err(E::msg)?.get_ids().to_vec();
-        if uncond_tokens.len() > sd_config.clip.max_position_embeddings {
-            anyhow::bail!(
-                "the negative prompt is too long, {} > max-tokens ({})",
-                uncond_tokens.len(),
-                sd_config.clip.max_position_embeddings
-            )
-        }
-        while uncond_tokens.len() < sd_config.clip.max_position_embeddings {
-            uncond_tokens.push(pad_id)
-        }
-
-        let uncond_tokens = Tensor::new(uncond_tokens.as_slice(), &device)?.unsqueeze(0)?;
-        let uncond_embeddings = text_model.forward(&uncond_tokens)?;
-
-        Tensor::cat(&[uncond_embeddings, text_embeddings], 0)?.to_dtype(dtype)?
-    }
-    else {
-        text_embeddings.to_dtype(dtype)?
+        text_embeddings.to_dtype(runner.data_type)?
     };
     Ok(text_embeddings)
 }
@@ -211,42 +149,34 @@ fn image_preprocess<T: AsRef<Path>>(path: T) -> Result<Tensor, DiffuserError> {
 pub struct DiffuseRunner {
     vae: AutoEncoderKL,
     unet: UNet2DConditionModel,
+    tokenizer1: DiffuserTokenizer,
+    tokenizer2: Option<DiffuserTokenizer>,
 }
 
 impl DiffuseRunner {
     pub fn load(model: &ModelVersion, sd: &StableDiffusionConfig, store: &ModelStorage) -> Result<Self, DiffuserError> {
-        Ok(Self { vae: Self::load_vae(model, sd, store)?, unet: Self::load_unet(model, sd, store)? })
+        Ok(Self {
+            vae: store.load_vae(model, sd)?,
+            unet: store.load_unet(model, sd)?,
+            tokenizer1: store.load_tokenizer1(&model, sd)?,
+            tokenizer2: store.load_tokenizer2(&model, &sd)?,
+        })
     }
-
-    fn load_vae(
-        model: &ModelVersion,
+    pub fn text_embeddings(
+        &self,
+        positive: &str,
+        negative: &str,
         sd: &StableDiffusionConfig,
-        store: &ModelStorage,
-    ) -> Result<AutoEncoderKL, DiffuserError> {
-        tracing::info!("正在构建 auto encoder");
-        let device = detect_device()?;
-        let (vae, dt) = match model {
-            ModelVersion::V1_5 { vae, .. } => store.load_weight(vae)?,
-            ModelVersion::V2_1 { vae, .. } => store.load_weight(vae)?,
-            ModelVersion::XL { vae, .. } => store.load_weight(vae)?,
-            ModelVersion::XL_Turbo { vae, .. } => store.load_weight(vae)?,
-        };
-        Ok(sd.build_vae(vae, &device, dt)?)
-    }
-    fn load_unet(
-        model: &ModelVersion,
-        sd: &StableDiffusionConfig,
-        store: &ModelStorage,
-    ) -> Result<UNet2DConditionModel, DiffuserError> {
-        tracing::info!("正在构建 UNet");
-        let device = detect_device()?;
-        let (unet, dt) = match model {
-            ModelVersion::V1_5 { unet, .. } => store.load_weight(unet)?,
-            ModelVersion::V2_1 { unet, .. } => store.load_weight(unet)?,
-            ModelVersion::XL { unet, .. } => store.load_weight(unet)?,
-            ModelVersion::XL_Turbo { unet, .. } => store.load_weight(unet)?,
-        };
-        Ok(sd.build_unet(unet, &device, 4, cfg!(feature = "flash"), dt)?)
+        batch_size: usize,
+        use_guide_scale: bool,
+    ) -> Result<Tensor, DiffuserError> {
+        let mut embedding1 = vec![text_embeddings(&positive, &negative, &self.tokenizer1, &sd, use_guide_scale)?];
+        match self.tokenizer2.as_ref() {
+            Some(s) => embedding1.push(text_embeddings(&positive, &negative, s, &sd, use_guide_scale)?),
+            None => {}
+        }
+        let text_embeddings = Tensor::cat(&embedding1, D::Minus1)?;
+        Ok(text_embeddings.repeat((batch_size, 1, 1))?)
     }
 }
 
@@ -263,7 +193,7 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
         // num_samples,
         batch_size,
         model,
-        use_f16,
+        data_type,
         guidance_scale,
         img2img,
         img2img_strength,
@@ -272,20 +202,13 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
     } = args;
 
     let store = ModelStorage::load(&here)?;
-
-    let bsize = batch_size.get();
-    let dtype = if use_f16 { DType::F16 } else { DType::F32 };
-
-    let img2img_strength = img2img_strength.max(0.0).min(1.0);
     let sd_version = store.load_version(&model)?;
-    let sd_config = match sd_version {
-        ModelVersion::V1_5 { .. } => StableDiffusionConfig::v1_5(Some(sliced_attention_size), Some(height), Some(width)),
-        ModelVersion::V2_1 { .. } => StableDiffusionConfig::v2_1(Some(sliced_attention_size), Some(height), Some(width)),
-        ModelVersion::XL { .. } => StableDiffusionConfig::sdxl(Some(sliced_attention_size), Some(height), Some(width)),
-        ModelVersion::XL_Turbo { .. } => {
-            StableDiffusionConfig::sdxl_turbo(Some(sliced_attention_size), Some(height), Some(width))
-        }
-    };
+    let sd_config = store.load_config(&sd_version, sliced_attention_size, width, height);
+    let runner = DiffuseRunner::load(&sd_version, &sd_config, &store)?;
+
+    let batch_size = batch_size.get();
+    let img2img_strength = img2img_strength.max(0.0).min(1.0);
+
     let n_steps = sd_version.adapt_steps(n_steps);
     let guidance_scale = sd_version.adapt_guidance_scale(guidance_scale);
 
@@ -295,39 +218,8 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
         device.set_seed(seed)?;
     }
     let use_guide_scale = guidance_scale > 1.0;
-
-    let mut embeddings = vec![
-        text_embeddings1(
-            &prompt,
-            &uncond_prompt,
-            &here.join("models").join("standard-v1.5-tokenizer.json"),
-            &here.join("models").join("standard-v1.5-clip.safetensors"),
-            &sd_config,
-            dtype,
-            use_guide_scale,
-        )
-        .map_err(|e| DiffuserError::custom(e.to_string()))?,
-    ];
-    match sd_version {
-        ModelVersion::XL { .. } | ModelVersion::XL_Turbo { .. } => embeddings.push(
-            text_embeddings2(
-                &prompt,
-                &uncond_prompt,
-                &here.join("models").join("standard-v1.5-tokenizer.json"),
-                &here.join("models").join("standard-v1.5-tokenizer.json"),
-                &sd_config,
-                dtype,
-                use_guide_scale,
-            )
-            .map_err(|e| DiffuserError::custom(e.to_string()))?,
-        ),
-        _ => {}
-    };
-    let text_embeddings = Tensor::cat(&embeddings, D::Minus1)?;
-    let text_embeddings = text_embeddings.repeat((bsize, 1, 1))?;
+    let text_embeddings = runner.text_embeddings(&prompt, &uncond_prompt, &sd_config, batch_size, use_guide_scale)?;
     println!("{text_embeddings:?}");
-
-    let runner = DiffuseRunner::load(&sd_version, &sd_config, &store)?;
 
     tracing::info!("正在构建 auto encoder");
     let vae_scale = sd_version.adapt_vae_scale(None);
@@ -354,13 +246,13 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
             }
         }
         None => {
-            let latents = Tensor::randn(0f32, 1f32, (bsize, 4, sd_config.height / 8, sd_config.width / 8), &device)?;
+            let latents = Tensor::randn(0f32, 1f32, (batch_size, 4, sd_config.height / 8, sd_config.width / 8), &device)?;
             (latents * scheduler.init_noise_sigma())?
         }
     };
-    let mut latents = latents.to_dtype(dtype)?;
+    let mut latents = latents.to_dtype(data_type)?;
 
-    println!("starting sampling");
+    println!("开始采样");
     for (timestep_index, &timestep) in timesteps.iter().enumerate() {
         if timestep_index < t_start {
             continue;
@@ -370,7 +262,7 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
 
         let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)?;
         let noise_pred = runner.unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
-
+ 
         let noise_pred = if use_guide_scale {
             let noise_pred = noise_pred.chunk(2, 0)?;
             let (noise_pred_uncond, noise_pred_text) = (&noise_pred[0], &noise_pred[1]);
@@ -386,11 +278,11 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
         println!("step {}/{n_steps} done, {:.2}s", timestep_index + 1, dt);
 
         if args.intermediary_images {
-            save_image(&runner.vae, &latents, vae_scale, bsize, "test.png", Some(timestep_index + 1))?;
+            save_image(&runner.vae, &latents, vae_scale, batch_size, "test.png", Some(timestep_index + 1))?;
         }
     }
 
     println!("Generating the final image for sample",);
-    save_image(&runner.vae, &latents, vae_scale, bsize, "test.png", None)?;
+    save_image(&runner.vae, &latents, vae_scale, batch_size, "test.png", None)?;
     Ok(())
 }

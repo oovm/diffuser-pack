@@ -16,6 +16,7 @@ edition = "2021"
 url = { version = "2.5.0", features = ["serde"] }
 tracing = "0.1.40"
 serde = { version = "1.0.198", features = ["default"] }
+tokenizers = "0.19.1"
 candle-core = { version = "0.4.1", default-features = false }
 candle-transformers = { version = "0.4.1", default-features = false }
 serde_yaml2 = "0.1.1"

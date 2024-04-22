@@ -6,10 +6,36 @@ mod ser;
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModelVersion {
-    V1_5 { vae: String, unet: String },
-    V2_1 { vae: String, unet: String },
-    XL { vae: String, unet: String },
-    XL_Turbo { vae: String, unet: String },
+    ///
+    V1_5 {
+        ///
+        vae: String,
+        unet: String,
+        clip: String,
+        token: String,
+    },
+    V2_1 {
+        vae: String,
+        unet: String,
+        clip: String,
+        token: String,
+    },
+    XL {
+        vae: String,
+        unet: String,
+        clip1: String,
+        token1: String,
+        clip2: String,
+        token2: String,
+    },
+    XL_Turbo {
+        vae: String,
+        unet: String,
+        clip1: String,
+        token1: String,
+        clip2: String,
+        token2: String,
+    },
 }
 
 impl ModelVersion {

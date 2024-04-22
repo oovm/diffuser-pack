@@ -24,7 +24,7 @@ pub struct DiffuseTask {
     pub batch_size: NonZeroUsize,
     pub model: String,
     /// Force to use f16
-    pub use_f16: bool,
+    pub data_type: DType,
     /// Generate intermediary images at each step.
     pub intermediary_images: bool,
     pub guidance_scale: Option<f64>,
@@ -51,7 +51,7 @@ impl Default for DiffuseTask {
             batch_size: NON_ZERO_ONE,
             model: "standard-v1.5-f32".to_string(),
             intermediary_images: false,
-            use_f16: true,
+            data_type: DType::F32,
             guidance_scale: None,
             img2img: None,
             img2img_strength: 0.0,

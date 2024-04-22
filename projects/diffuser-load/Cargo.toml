@@ -24,6 +24,7 @@ anyhow = "1.0.82"
 image = "0.25.1"
 tracing-subscriber = "0.3.18"
 hf-hub = { version = "0.3.2" }
+serde_yaml2 = "0.1.1"
 
 [dependencies.diffuser-error]
 version = "0.0.0"
@@ -33,6 +34,7 @@ features = []
 [dev-dependencies]
 
 [features]
-default = ["cuda", "cudnn"]
+default = ["cuda"]
 cuda = ["candle-core/cuda", "candle-transformers/cuda"]
 cudnn = ["candle-core/cudnn"]
+flash = ["candle-transformers/flash-attn"]

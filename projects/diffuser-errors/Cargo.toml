@@ -13,7 +13,8 @@ license = "MPL-2.0"
 edition = "2021"
 
 [dependencies]
-url = "2.5.0"
+url = { version = "2.5.0", features = ["serde"] }
+tracing = "0.1.40"
 serde = { version = "1.0.198", features = ["default"] }
 candle-core = { version = "0.4.1", default-features = false}
 

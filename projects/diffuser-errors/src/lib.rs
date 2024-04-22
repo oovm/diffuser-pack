@@ -1,9 +1,10 @@
 mod errors;
 mod types;
 
-pub use crate::errors::{DiffuserErrorKind, MissingPartError, MissingPartKind};
-pub use crate::types::{versions::ModelVersion, ModelInfo};
-
+pub use crate::{
+    errors::{DiffuserErrorKind, MissingPartError, MissingPartKind},
+    types::{versions::ModelVersion, weights::WeightInfo, ModelStorage},
+};
 type Result<T> = core::result::Result<T, DiffuserError>;
 
 pub struct DiffuserError {

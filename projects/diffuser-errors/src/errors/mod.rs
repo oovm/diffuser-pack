@@ -39,3 +39,9 @@ impl DiffuserError {
         DiffuserErrorKind::CustomError(message.into()).into()
     }
 }
+
+impl From<serde::de::value::Error> for DiffuserError {
+    fn from(error: serde::de::value::Error) -> Self {
+        DiffuserErrorKind::CustomError(error.to_string()).into()
+    }
+}

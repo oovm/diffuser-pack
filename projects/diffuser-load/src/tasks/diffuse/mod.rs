@@ -1,14 +1,10 @@
-use std::fmt::Formatter;
-use std::num::NonZeroUsize;
-use candle_core::DType;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde::de::Visitor;
-use serde::ser::SerializeStruct;
 use crate::ModelVersion;
+use candle_core::DType;
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
+use std::{fmt::Formatter, num::NonZeroUsize};
 
-mod ser;
 mod der;
-
+mod ser;
 
 #[derive(Debug)]
 pub struct DiffuseTask {
@@ -26,14 +22,14 @@ pub struct DiffuseTask {
     pub n_steps: Option<usize>,
     /// The numbers of samples to generate simultaneously.
     pub batch_size: NonZeroUsize,
-    pub sd_version: ModelVersion,
+    pub model: String,
     /// Force to use f16
     pub use_f16: bool,
     /// Generate intermediary images at each step.
     pub intermediary_images: bool,
     pub guidance_scale: Option<f64>,
     pub img2img: Option<String>,
-    /// The strength, indicates how much to transform the initial image. 
+    /// The strength, indicates how much to transform the initial image.
     /// The    /// value must be between 0 and 1, a value of 1 discards the initial image
     /// information.
     pub img2img_strength: f64,
@@ -41,9 +37,7 @@ pub struct DiffuseTask {
     pub seed: Option<u64>,
 }
 
-const NON_ZERO_ONE: NonZeroUsize = unsafe {
-    NonZeroUsize::new_unchecked(1)
-};
+const NON_ZERO_ONE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
 
 impl Default for DiffuseTask {
     fn default() -> Self {
@@ -55,7 +49,7 @@ impl Default for DiffuseTask {
             sliced_attention_size: 0,
             n_steps: None,
             batch_size: NON_ZERO_ONE,
-            sd_version: ModelVersion::V1_5 { vae: "standard-v1.5-clip.safetensors".to_string(), unet: "".to_string() },
+            model: "standard-v1.5-f32".to_string(),
             intermediary_images: false,
             use_f16: true,
             guidance_scale: None,
@@ -65,4 +59,3 @@ impl Default for DiffuseTask {
         }
     }
 }
-

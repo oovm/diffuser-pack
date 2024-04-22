@@ -4,16 +4,16 @@ use candle_core::{
     DType, Device, IndexOp, Module, Tensor, D,
 };
 use candle_transformers::models::{stable_diffusion, stable_diffusion::unet_2d::UNet2DConditionModel};
+use serde::de::value::Error;
+
 use stable_diffusion::StableDiffusionConfig;
 use std::{
     env::current_dir,
     path::{Path, PathBuf},
 };
-use serde::de::value::Error;
-use serde_yaml2::de::YamlDeserializer;
 
 use crate::helpers::detect_device;
-use diffuser_error::{ModelVersion, ModelStorage, DiffuserError};
+use diffuser_error::{DiffuserError, ModelStorage, ModelVersion};
 use stable_diffusion::vae::AutoEncoderKL;
 use tokenizers::Tokenizer;
 
@@ -54,29 +54,29 @@ fn save_image(
     batch_size: usize,
     final_image: &str,
     timestep_ids: Option<usize>,
-) -> Result<()> {
+) -> Result<(), DiffuserError> {
     let images = vae.decode(&(latents / vae_scale)?)?;
     let images = ((images / 2.)? + 0.5)?.to_device(&Device::Cpu)?;
     let images = (images.clamp(0f32, 1.)? * 255.)?.to_dtype(DType::U8)?;
     for batch in 0..batch_size {
-        let image = images.i(batch)?;
+        let img = images.i(batch)?;
         let image_filename = output_filename(final_image, (batch_size * 0) + batch + 1, batch + 1, timestep_ids);
-        save_image_raw(&image, &image_filename)?;
+        save_image_raw(&img, &image_filename)?;
     }
     Ok(())
 }
 
-pub fn save_image_raw(img: &Tensor, path: &Path) -> anyhow::Result<()> {
+pub fn save_image_raw(img: &Tensor, path: &Path) -> Result<(), DiffuserError> {
     let (channel, height, width) = img.dims3()?;
     if channel != 3 {
-        anyhow::bail!("save_image expects an input of shape (3, height, width)")
+        Err(DiffuserError::custom("save_image expects an input of shape (3, height, width)"))?
     }
     let img = img.permute((1, 2, 0))?.flatten_all()?;
     let pixels = img.to_vec1::<u8>()?;
     let image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
         match image::ImageBuffer::from_raw(width as u32, height as u32, pixels) {
             Some(image) => image,
-            None => anyhow::bail!("error saving image {}", path.display()),
+            None => Err(DiffuserError::custom(format!("error saving image {}", path.display())))?,
         };
     image.save(path).map_err(candle_core::Error::wrap)?;
     Ok(())
@@ -192,8 +192,8 @@ fn text_embeddings2(
     Ok(text_embeddings)
 }
 
-fn image_preprocess<T: AsRef<std::path::Path>>(path: T) -> Result<Tensor> {
-    let img = image::io::Reader::open(path)?.decode()?;
+fn image_preprocess<T: AsRef<Path>>(path: T) -> Result<Tensor, DiffuserError> {
+    let img = image::io::Reader::open(path)?.decode().map_err(DiffuserError::custom)?;
     let (height, width) = (img.height() as usize, img.width() as usize);
     let height = height - height % 32;
     let width = width - width % 32;
@@ -214,54 +214,43 @@ pub struct DiffuseRunner {
 }
 
 impl DiffuseRunner {
-    fn load_vae(model: &ModelVersion, sd: &StableDiffusionConfig, store: &ModelStorage) -> Result<AutoEncoderKL> {
+    pub fn load(model: &ModelVersion, sd: &StableDiffusionConfig, store: &ModelStorage) -> Result<Self, DiffuserError> {
+        Ok(Self { vae: Self::load_vae(model, sd, store)?, unet: Self::load_unet(model, sd, store)? })
+    }
+
+    fn load_vae(
+        model: &ModelVersion,
+        sd: &StableDiffusionConfig,
+        store: &ModelStorage,
+    ) -> Result<AutoEncoderKL, DiffuserError> {
         tracing::info!("正在构建 auto encoder");
         let device = detect_device()?;
         let (vae, dt) = match model {
-            ModelVersion::V1_5 { vae, .. } => {
-                 store.load_weight(vae)?;
-                
-            }
-            ModelVersion::V2_1 { vae, .. } => {
-                let (path, dt) = store.load_weight(vae)?;
-                sd.build_vae(path, &device, dt)?
-            }
-            ModelVersion::XL { vae, .. } => {
-                let (path, dt) = store.load_weight(vae)?;
-                sd.build_vae(path, &device, dt)?
-            }
-            ModelVersion::XL_Turbo { vae, .. } => {
-                let (path, dt) = store.load_weight(vae)?;
-                sd.build_vae(path, &device, dt)?
-            }
+            ModelVersion::V1_5 { vae, .. } => store.load_weight(vae)?,
+            ModelVersion::V2_1 { vae, .. } => store.load_weight(vae)?,
+            ModelVersion::XL { vae, .. } => store.load_weight(vae)?,
+            ModelVersion::XL_Turbo { vae, .. } => store.load_weight(vae)?,
         };
-        Ok(sd.build_vae(path, &device, dt)?)
+        Ok(sd.build_vae(vae, &device, dt)?)
     }
-    fn load_unet(model: &ModelVersion, sd: &StableDiffusionConfig, store: &ModelStorage) -> Result<UNet2DConditionModel> {
-        tracing::info!("正在构建 auto encoder");
-        let vae = match model {
-            ModelVersion::V1_5 { unet,  .. } => {
-                let (path, dt) = store.load_weight(unet)?;
-                sd.build_unet(path, &device, 4, cfg!(feature = "flash"), dt)?
-            }
-            ModelVersion::V2_1 { vae,  .. } => {
-                let path = root.join("models").join(vae);
-                sd.build_unet(path, &device, 4, cfg!(feature = "flash"), *r#type)?
-            }
-            ModelVersion::XL { vae,  .. } => {
-                let path = root.join("models").join(vae);
-                sd.build_unet(path, &device, 4, cfg!(feature = "flash"), *r#type)?
-            }
-            ModelVersion::XL_Turbo { vae .. } => {
-                let path = root.join("models").join(vae);
-                sd.build_unet(path, &device, 4, cfg!(feature = "flash"), *r#type)?
-            }
+    fn load_unet(
+        model: &ModelVersion,
+        sd: &StableDiffusionConfig,
+        store: &ModelStorage,
+    ) -> Result<UNet2DConditionModel, DiffuserError> {
+        tracing::info!("正在构建 UNet");
+        let device = detect_device()?;
+        let (unet, dt) = match model {
+            ModelVersion::V1_5 { unet, .. } => store.load_weight(unet)?,
+            ModelVersion::V2_1 { unet, .. } => store.load_weight(unet)?,
+            ModelVersion::XL { unet, .. } => store.load_weight(unet)?,
+            ModelVersion::XL_Turbo { unet, .. } => store.load_weight(unet)?,
         };
-        Ok(vae)
+        Ok(sd.build_unet(unet, &device, 4, cfg!(feature = "flash"), dt)?)
     }
 }
 
-pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
+pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
     let here = current_dir()?;
     println!("Running on {}", here.display());
     let DiffuseTask {
@@ -273,7 +262,7 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
         sliced_attention_size,
         // num_samples,
         batch_size,
-        sd_version,
+        model,
         use_f16,
         guidance_scale,
         img2img,
@@ -282,22 +271,20 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
         ..
     } = args;
 
-    
-    let storage = here.join("models").join("models.yaml");
-    let storage = storage.to_str().unwrap();
-    let mut der = YamlDeserializer::from_str(storage)?;
-    let store = ModelStorage::load(here, &mut der)?;
-    
-    
+    let store = ModelStorage::load(&here)?;
+
     let bsize = batch_size.get();
     let dtype = if use_f16 { DType::F16 } else { DType::F32 };
 
     let img2img_strength = img2img_strength.max(0.0).min(1.0);
+    let sd_version = store.load_version(&model)?;
     let sd_config = match sd_version {
         ModelVersion::V1_5 { .. } => StableDiffusionConfig::v1_5(Some(sliced_attention_size), Some(height), Some(width)),
         ModelVersion::V2_1 { .. } => StableDiffusionConfig::v2_1(Some(sliced_attention_size), Some(height), Some(width)),
         ModelVersion::XL { .. } => StableDiffusionConfig::sdxl(Some(sliced_attention_size), Some(height), Some(width)),
-        ModelVersion::XL_Turbo { .. } => StableDiffusionConfig::sdxl_turbo(Some(sliced_attention_size), Some(height), Some(width)),
+        ModelVersion::XL_Turbo { .. } => {
+            StableDiffusionConfig::sdxl_turbo(Some(sliced_attention_size), Some(height), Some(width))
+        }
     };
     let n_steps = sd_version.adapt_steps(n_steps);
     let guidance_scale = sd_version.adapt_guidance_scale(guidance_scale);
@@ -309,36 +296,38 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
     }
     let use_guide_scale = guidance_scale > 1.0;
 
-    let mut embeddings = vec![text_embeddings1(
-        &prompt,
-        &uncond_prompt,
-        &here.join("models").join("standard-v1.5-tokenizer.json"),
-        &here.join("models").join("standard-v1.5-clip.safetensors"),
-        &sd_config,
-        dtype,
-        use_guide_scale,
-    )?];
-    match sd_version {
-        ModelVersion::XL { .. } | ModelVersion::XL_Turbo { .. } => embeddings.push(text_embeddings2(
+    let mut embeddings = vec![
+        text_embeddings1(
             &prompt,
             &uncond_prompt,
             &here.join("models").join("standard-v1.5-tokenizer.json"),
-            &here.join("models").join("standard-v1.5-tokenizer.json"),
+            &here.join("models").join("standard-v1.5-clip.safetensors"),
             &sd_config,
             dtype,
             use_guide_scale,
-        )?),
+        )
+        .map_err(|e| DiffuserError::custom(e.to_string()))?,
+    ];
+    match sd_version {
+        ModelVersion::XL { .. } | ModelVersion::XL_Turbo { .. } => embeddings.push(
+            text_embeddings2(
+                &prompt,
+                &uncond_prompt,
+                &here.join("models").join("standard-v1.5-tokenizer.json"),
+                &here.join("models").join("standard-v1.5-tokenizer.json"),
+                &sd_config,
+                dtype,
+                use_guide_scale,
+            )
+            .map_err(|e| DiffuserError::custom(e.to_string()))?,
+        ),
         _ => {}
     };
     let text_embeddings = Tensor::cat(&embeddings, D::Minus1)?;
     let text_embeddings = text_embeddings.repeat((bsize, 1, 1))?;
     println!("{text_embeddings:?}");
 
-    let vae = DiffuseRunner::load_vae(&sd_version, &here, &sd_config, &device)?;
-
-    tracing::info!("正在构建 unet");
-    let unet_weights = here.join("models").join("standard-v1.5-unet-f32.safetensors");
-    let unet = sd_config.build_unet(unet_weights, &device, 4, cfg!(feature = "flash"), dtype)?;
+    let runner = DiffuseRunner::load(&sd_version, &sd_config, &store)?;
 
     tracing::info!("正在构建 auto encoder");
     let vae_scale = sd_version.adapt_vae_scale(None);
@@ -346,10 +335,9 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
         None => None,
         Some(image) => {
             let image = image_preprocess(image)?.to_device(&device)?;
-            Some(vae.encode(&image)?)
+            Some(runner.vae.encode(&image)?)
         }
     };
-
     tracing::info!("正在构建 unet");
     let t_start = if img2img.is_some() { n_steps - (n_steps as f64 * img2img_strength) as usize } else { 0 };
 
@@ -381,7 +369,7 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
         let latent_model_input = if use_guide_scale { Tensor::cat(&[&latents, &latents], 0)? } else { latents.clone() };
 
         let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)?;
-        let noise_pred = unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
+        let noise_pred = runner.unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
 
         let noise_pred = if use_guide_scale {
             let noise_pred = noise_pred.chunk(2, 0)?;
@@ -398,11 +386,11 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<()> {
         println!("step {}/{n_steps} done, {:.2}s", timestep_index + 1, dt);
 
         if args.intermediary_images {
-            save_image(&vae, &latents, vae_scale, bsize, "test.png", Some(timestep_index + 1))?;
+            save_image(&runner.vae, &latents, vae_scale, bsize, "test.png", Some(timestep_index + 1))?;
         }
     }
 
     println!("Generating the final image for sample",);
-    save_image(&vae, &latents, vae_scale, bsize, "test.png", None)?;
+    save_image(&runner.vae, &latents, vae_scale, bsize, "test.png", None)?;
     Ok(())
 }

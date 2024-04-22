@@ -8,12 +8,13 @@ impl<'de> Deserialize<'de> for ModelVersion {
     {
         let mut visitor = DiffuserVisitor::default();
         deserializer.deserialize_map(&mut visitor)?;
-        let model = match visitor.version.to_ascii_lowercase().as_str() {
-            "v1.5" | "v1_5" => ModelVersion::V1_5 { vae: visitor.vae, r#type: DType::U8 },
-            "v2.1" | "v2_1" => ModelVersion::V2_1 { vae: visitor.vae, r#type: DType::U8 },
-            "xl" => ModelVersion::XL { vae: visitor.vae, r#type: DType::U8 },
-            "xl turbo" | "xl_turbo" => ModelVersion::XL_Turbo { vae: visitor.vae, r#type: DType::U8 },
-            _ => Err(Error::custom("expect one of ('v1.5', 'v2.1', 'XL', 'XL Turbo')"))?,
+        let version = visitor.version.to_ascii_lowercase();
+        let model = match version.as_str() {
+            "v1.5" | "v1_5" => ModelVersion::V1_5 { vae: visitor.vae, unet: visitor.unet },
+            "v2.1" | "v2_1" => ModelVersion::V2_1 { vae: visitor.vae, unet: visitor.unet },
+            "xl" => ModelVersion::XL { vae: visitor.vae, unet: visitor.unet },
+            "xl turbo" | "xl_turbo" => ModelVersion::XL_Turbo { vae: visitor.vae, unet: visitor.unet },
+            _ => Err(Error::custom(format!("不支持 {version} 版本, 必须是 ('v1.5', 'v2.1', 'XL', 'XL Turbo') 之一")))?,
         };
         Ok(model)
     }

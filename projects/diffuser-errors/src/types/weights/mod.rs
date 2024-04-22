@@ -22,7 +22,16 @@ impl<'de> Deserialize<'de> for WeightInfo {
     where
         D: Deserializer<'de>,
     {
-        todo!()
+        let mut visitor = WeightVisitor {
+            data: WeightInfo {
+                remote: unsafe { Url::from_str("https://example.org").unwrap_unchecked() },
+                local: "".to_string(),
+                r#type: DType::F32,
+                hash: 0,
+            },
+        };
+        deserializer.deserialize_map(&mut visitor)?;
+        Ok(visitor.data)
     }
 }
 struct WeightVisitor {
@@ -41,15 +50,19 @@ impl<'i, 'de> Visitor<'de> for &'i mut WeightVisitor {
     {
         while let Some(key) = map.next_key::<String>()? {
             match key.to_ascii_lowercase().as_str() {
-                "id" => self.data.id = map.next_value()?,
-                "data" => {
+                "local" => self.data.local = map.next_value()?,
+                "remote" => {
+                    // TODO: read str
+                    let url = map.next_value::<String>()?;
+                    self.data.remote = Url::from_str(&url).map_err(A::Error::custom)?;
+                },
+                "type" => {
                     let str = map.next_value::<String>()?;
                     match DType::from_str(&str) {
                         Ok(o) => self.data.r#type = o,
-                        Err(_) => Err(A::Error::custom("dot a valid data type"))?,
+                        Err(_) => Err(Error::custom("dot a valid data type"))?,
                     }
                 }
-                "remote" => self.data.remote = map.next_value()?,
                 "hash" => self.data.hash = map.next_value()?,
                 _ => {}
             }

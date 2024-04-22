@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, },
     fmt::{Display, Formatter},
     fs::{create_dir, read_to_string, File},
     io::Write,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use candle_core::{
-    utils::{cuda_is_available, metal_is_available},
+    utils::{ metal_is_available},
     DType, Device,
 };
 use candle_transformers::models::{
@@ -163,6 +163,7 @@ impl ModelStorage {
         &self,
         model: &ModelVersion,
         sd: &StableDiffusionConfig,
+        device: &Device,
     ) -> Result<DiffuserTokenizer, DiffuserError> {
         tracing::info!("正在构建 Tokenizer");
         let (tk, dt) = match model {
@@ -175,11 +176,10 @@ impl ModelStorage {
             Ok(o) => o,
             Err(e) => Err(DiffuserError::custom(e))?,
         };
-        Ok(DiffuserTokenizer { data_type: dt, tokenizer: token, clip: self.load_clip1(model, sd)? })
+        Ok(DiffuserTokenizer { data_type: dt, tokenizer: token, clip: self.load_clip1(model, sd, device)? })
     }
-    fn load_clip1(&self, model: &ModelVersion, sd: &StableDiffusionConfig) -> Result<ClipTextTransformer, DiffuserError> {
+    fn load_clip1(&self, model: &ModelVersion, sd: &StableDiffusionConfig, device: &Device) -> Result<ClipTextTransformer, DiffuserError> {
         tracing::info!("正在构建 Clip");
-        let device = detect_device()?;
         let (clip, dt) = match model {
             ModelVersion::V1_5 { clip, .. } => self.load_weight(clip)?,
             ModelVersion::V2_1 { clip, .. } => self.load_weight(clip)?,
@@ -193,6 +193,7 @@ impl ModelStorage {
         &self,
         model: &ModelVersion,
         sd: &StableDiffusionConfig,
+        device: &Device,
     ) -> Result<Option<DiffuserTokenizer>, DiffuserError> {
         tracing::info!("正在构建 Tokenizer 2");
         let (tk, dt) = match model {
@@ -205,11 +206,10 @@ impl ModelStorage {
             Ok(o) => o,
             Err(e) => Err(DiffuserError::custom(e))?,
         };
-        Ok(Some(DiffuserTokenizer { data_type: dt, tokenizer: token, clip: self.load_clip2(model, sd)? }))
+        Ok(Some(DiffuserTokenizer { data_type: dt, tokenizer: token, clip: self.load_clip2(model, sd, device)? }))
     }
-    fn load_clip2(&self, model: &ModelVersion, sd: &StableDiffusionConfig) -> Result<ClipTextTransformer, DiffuserError> {
+    fn load_clip2(&self, model: &ModelVersion, sd: &StableDiffusionConfig, device: &Device) -> Result<ClipTextTransformer, DiffuserError> {
         tracing::info!("正在构建 UNet");
-        let device = detect_device()?;
         let (clip, dt) = match model {
             ModelVersion::V1_5 { .. } => unreachable!(),
             ModelVersion::V2_1 { .. } => unreachable!(),
@@ -220,9 +220,8 @@ impl ModelStorage {
         Ok(stable_diffusion::build_clip_transformer(&config, clip, &device, dt)?)
     }
 
-    pub fn load_vae(&self, model: &ModelVersion, sd: &StableDiffusionConfig) -> Result<AutoEncoderKL, DiffuserError> {
+    pub fn load_vae(&self, model: &ModelVersion, sd: &StableDiffusionConfig, device: &Device) -> Result<AutoEncoderKL, DiffuserError> {
         tracing::info!("正在构建 auto encoder");
-        let device = detect_device()?;
         let (vae, dt) = match model {
             ModelVersion::V1_5 { vae, .. } => self.load_weight(vae)?,
             ModelVersion::V2_1 { vae, .. } => self.load_weight(vae)?,
@@ -231,9 +230,8 @@ impl ModelStorage {
         };
         Ok(sd.build_vae(vae, &device, dt)?)
     }
-    pub fn load_unet(&self, model: &ModelVersion, sd: &StableDiffusionConfig) -> Result<UNet2DConditionModel, DiffuserError> {
+    pub fn load_unet(&self, model: &ModelVersion, sd: &StableDiffusionConfig, device: &Device) -> Result<UNet2DConditionModel, DiffuserError> {
         tracing::info!("正在构建 UNet");
-        let device = detect_device()?;
         let (unet, dt) = match model {
             ModelVersion::V1_5 { unet, .. } => self.load_weight(unet)?,
             ModelVersion::V2_1 { unet, .. } => self.load_weight(unet)?,
@@ -241,25 +239,5 @@ impl ModelStorage {
             ModelVersion::XL_Turbo { unet, .. } => self.load_weight(unet)?,
         };
         Ok(sd.build_unet(unet, &device, 4, cfg!(feature = "flash"), dt)?)
-    }
-}
-
-pub fn detect_device() -> candle_core::Result<Device> {
-    if cuda_is_available() {
-        Ok(Device::new_cuda(0)?)
-    }
-    else if metal_is_available() {
-        Ok(Device::new_metal(0)?)
-    }
-    else {
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        {
-            println!("Running on CPU, to run on GPU(metal), build this example with `--features metal`");
-        }
-        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-        {
-            println!("Running on CPU, to run on GPU, build this example with `--features cuda`");
-        }
-        Ok(Device::Cpu)
     }
 }

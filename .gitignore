@@ -17,7 +17,7 @@ Cargo.lock
 *.pt
 *.pth
 *.pkl
-
+*.png
 
 stabilityai/
 openai/

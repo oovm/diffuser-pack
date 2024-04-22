@@ -1,12 +1,10 @@
 use anyhow::{Error as E, Result};
 use candle_core::{
-    utils::{cuda_is_available, metal_is_available},
     DType, Device, IndexOp, Module, Tensor, D,
 };
 use candle_transformers::models::{stable_diffusion, stable_diffusion::unet_2d::UNet2DConditionModel};
 use serde::de::value::Error;
 
-use candle_transformers::models::stable_diffusion::clip::ClipTextTransformer;
 use stable_diffusion::StableDiffusionConfig;
 use std::{
     env::current_dir,
@@ -16,7 +14,6 @@ use std::{
 use crate::helpers::detect_device;
 use diffuser_error::{DiffuserError, DiffuserTokenizer, ModelStorage, ModelVersion};
 use stable_diffusion::vae::AutoEncoderKL;
-use tokenizers::Tokenizer;
 
 pub mod helpers;
 mod tasks;
@@ -147,6 +144,7 @@ fn image_preprocess<T: AsRef<Path>>(path: T) -> Result<Tensor, DiffuserError> {
 }
 
 pub struct DiffuseRunner {
+    device: Device,
     vae: AutoEncoderKL,
     unet: UNet2DConditionModel,
     tokenizer1: DiffuserTokenizer,
@@ -155,11 +153,13 @@ pub struct DiffuseRunner {
 
 impl DiffuseRunner {
     pub fn load(model: &ModelVersion, sd: &StableDiffusionConfig, store: &ModelStorage) -> Result<Self, DiffuserError> {
+        let device = detect_device()?;
         Ok(Self {
-            vae: store.load_vae(model, sd)?,
-            unet: store.load_unet(model, sd)?,
-            tokenizer1: store.load_tokenizer1(&model, sd)?,
-            tokenizer2: store.load_tokenizer2(&model, &sd)?,
+            vae: store.load_vae(model, sd, &device)?,
+            unet: store.load_unet(model, sd, &device)?,
+            tokenizer1: store.load_tokenizer1(&model, sd, &device)?,
+            tokenizer2: store.load_tokenizer2(&model, &sd, &device)?,
+            device,
         })
     }
     pub fn text_embeddings(
@@ -180,109 +180,94 @@ impl DiffuseRunner {
     }
 }
 
-pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
-    let here = current_dir()?;
-    println!("Running on {}", here.display());
-    let DiffuseTask {
-        positive_prompt: prompt,
-        negative_prompt: uncond_prompt,
-        height,
-        width,
-        n_steps,
+impl DiffuseTask {
+    pub fn run(&self, out: &Path) -> Result<(), DiffuserError> {
+        let here = current_dir()?;
+        println!("Running on {}", here.display());
+        let store = ModelStorage::load(&here)?;
+        let sd_version = store.load_version(&self.model)?;
+        let sd_config = store.load_config(&sd_version, self.width, self.height);
+        let runner = DiffuseRunner::load(&sd_version, &sd_config, &store)?;
 
-        // num_samples,
-        batch_size,
-        model,
-        data_type,
-        guidance_scale,
-        img2img,
-        img2img_strength,
-        seed,
-        ..
-    } = args;
+        let batch_size = self.batch_size.get();
+        let img2img_strength = self.img2img_strength.max(0.0).min(1.0);
 
-    let store = ModelStorage::load(&here)?;
-    let sd_version = store.load_version(&model)?;
-    let sd_config = store.load_config(&sd_version, width, height);
-    let runner = DiffuseRunner::load(&sd_version, &sd_config, &store)?;
+        let n_steps = sd_version.adapt_steps(self.n_steps);
+        let guidance_scale = sd_version.adapt_guidance_scale(self.guidance_scale);
 
-    let batch_size = batch_size.get();
-    let img2img_strength = img2img_strength.max(0.0).min(1.0);
-
-    let n_steps = sd_version.adapt_steps(n_steps);
-    let guidance_scale = sd_version.adapt_guidance_scale(guidance_scale);
-
-    let scheduler = sd_config.build_scheduler(n_steps)?;
-    let device = detect_device()?;
-    if let Some(seed) = seed {
-        device.set_seed(seed)?;
-    }
-    let use_guide_scale = guidance_scale > 1.0;
-    let text_embeddings = runner.text_embeddings(&prompt, &uncond_prompt, &sd_config, batch_size, use_guide_scale)?;
-    println!("{text_embeddings:?}");
-
-    tracing::info!("正在构建 auto encoder");
-    let vae_scale = sd_version.adapt_vae_scale(None);
-    let init_latent_dist = match &img2img {
-        None => None,
-        Some(image) => {
-            let image = image_preprocess(image)?.to_device(&device)?;
-            Some(runner.vae.encode(&image)?)
+        let scheduler = sd_config.build_scheduler(n_steps)?;
+        let device = detect_device()?;
+        if let Some(seed) = self.seed {
+            device.set_seed(seed)?;
         }
-    };
-    tracing::info!("正在构建 unet");
-    let t_start = if img2img.is_some() { n_steps - (n_steps as f64 * img2img_strength) as usize } else { 0 };
+        let use_guide_scale = guidance_scale > 1.0;
+        let text_embeddings = runner.text_embeddings(&self.positive_prompt, &self.negative_prompt, &sd_config, batch_size, use_guide_scale)?;
+        println!("{text_embeddings:?}");
 
-    let timesteps = scheduler.timesteps();
-    let latents = match &init_latent_dist {
-        Some(init_latent_dist) => {
-            let latents = (init_latent_dist.sample()? * vae_scale)?.to_device(&device)?;
-            if t_start < timesteps.len() {
-                let noise = latents.randn_like(0f64, 1f64)?;
-                scheduler.add_noise(&latents, noise, timesteps[t_start])?
+        tracing::info!("正在构建 auto encoder");
+        let vae_scale = sd_version.adapt_vae_scale(None);
+        let init_latent_dist = match &self.img2img {
+            None => None,
+            Some(image) => {
+                let image = image_preprocess(image)?.to_device(&device)?;
+                Some(runner.vae.encode(&image)?)
+            }
+        };
+        tracing::info!("正在构建 unet");
+        let t_start = if self.img2img.is_some() { n_steps - (n_steps as f64 * img2img_strength) as usize } else { 0 };
+
+        let t_steps = scheduler.timesteps();
+        let latents = match &init_latent_dist {
+            Some(init_latent_dist) => {
+                let latents = (init_latent_dist.sample()? * vae_scale)?.to_device(&device)?;
+                if t_start < t_steps.len() {
+                    let noise = latents.randn_like(0f64, 1f64)?;
+                    scheduler.add_noise(&latents, noise, t_steps[t_start])?
+                }
+                else {
+                    latents
+                }
+            }
+            None => {
+                let latents = Tensor::randn(0f32, 1f32, (batch_size, 4, sd_config.height / 8, sd_config.width / 8), &device)?;
+                (latents * scheduler.init_noise_sigma())?
+            }
+        };
+        let mut latents = latents.to_dtype(self.data_type)?;
+
+        println!("开始采样");
+        for (timestep_index, &timestep) in t_steps.iter().enumerate() {
+            if timestep_index < t_start {
+                continue;
+            }
+            let start_time = std::time::Instant::now();
+            let latent_model_input = if use_guide_scale { Tensor::cat(&[&latents, &latents], 0)? } else { latents.clone() };
+
+            let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)?;
+            let noise_pred = runner.unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
+
+            let noise_pred = if use_guide_scale {
+                let noise_pred = noise_pred.chunk(2, 0)?;
+                let (noise_pred_uncond, noise_pred_text) = (&noise_pred[0], &noise_pred[1]);
+
+                (noise_pred_uncond + ((noise_pred_text - noise_pred_uncond)? * guidance_scale)?)?
             }
             else {
-                latents
+                noise_pred
+            };
+
+            latents = scheduler.step(&noise_pred, timestep, &latents)?;
+            let dt = start_time.elapsed().as_secs_f32();
+            println!("step {}/{n_steps} done, {:.2}s", timestep_index + 1, dt);
+
+            if self.intermediary_images {
+                save_image(&runner.vae, &latents, vae_scale, batch_size, "test.png", Some(timestep_index + 1))?;
             }
         }
-        None => {
-            let latents = Tensor::randn(0f32, 1f32, (batch_size, 4, sd_config.height / 8, sd_config.width / 8), &device)?;
-            (latents * scheduler.init_noise_sigma())?
-        }
-    };
-    let mut latents = latents.to_dtype(data_type)?;
 
-    println!("开始采样");
-    for (timestep_index, &timestep) in timesteps.iter().enumerate() {
-        if timestep_index < t_start {
-            continue;
-        }
-        let start_time = std::time::Instant::now();
-        let latent_model_input = if use_guide_scale { Tensor::cat(&[&latents, &latents], 0)? } else { latents.clone() };
-
-        let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)?;
-        let noise_pred = runner.unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
- 
-        let noise_pred = if use_guide_scale {
-            let noise_pred = noise_pred.chunk(2, 0)?;
-            let (noise_pred_uncond, noise_pred_text) = (&noise_pred[0], &noise_pred[1]);
-
-            (noise_pred_uncond + ((noise_pred_text - noise_pred_uncond)? * guidance_scale)?)?
-        }
-        else {
-            noise_pred
-        };
-
-        latents = scheduler.step(&noise_pred, timestep, &latents)?;
-        let dt = start_time.elapsed().as_secs_f32();
-        println!("step {}/{n_steps} done, {:.2}s", timestep_index + 1, dt);
-
-        if args.intermediary_images {
-            save_image(&runner.vae, &latents, vae_scale, batch_size, "test.png", Some(timestep_index + 1))?;
-        }
+        println!("Generating the final image for sample",);
+        save_image(&runner.vae, &latents, vae_scale, batch_size, "test.png", None)?;
+        Ok(())
     }
 
-    println!("Generating the final image for sample",);
-    save_image(&runner.vae, &latents, vae_scale, batch_size, "test.png", None)?;
-    Ok(())
 }

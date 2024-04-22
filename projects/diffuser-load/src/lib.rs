@@ -1,4 +1,7 @@
+use std::env::{current_dir, current_exe};
 use std::fmt::Formatter;
+use std::fs::create_dir;
+use std::path::{Path, PathBuf};
 use candle_transformers::models::stable_diffusion;
 use anyhow::{Error as E, Result};
 use candle_core::{DType, Device, IndexOp, Module, Tensor, D};
@@ -53,11 +56,12 @@ pub struct DiffuserTaskRunner {
     pub seed: Option<u64>,
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StableDiffusionVersion {
     V1_5,
     V2_1,
-    Xl,
+    XL,
     XL_Turbo,
 }
 
@@ -74,7 +78,7 @@ pub enum ModelFile {
 impl StableDiffusionVersion {
     fn repo(&self) -> &'static str {
         match self {
-            Self::Xl => "stabilityai/stable-diffusion-xl-base-1.0",
+            Self::XL => "stabilityai/stable-diffusion-xl-base-1.0",
             Self::V2_1 => "stabilityai/stable-diffusion-2-1",
             Self::V1_5 => "runwayml/stable-diffusion-v1-5",
             Self::XL_Turbo => "stabilityai/sdxl-turbo",
@@ -83,7 +87,7 @@ impl StableDiffusionVersion {
 
     fn unet_file(&self, use_f16: bool) -> &'static str {
         match self {
-            Self::V1_5 | Self::V2_1 | Self::Xl | Self::XL_Turbo => {
+            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
                 if use_f16 {
                     "unet/diffusion_pytorch_model.fp16.safetensors"
                 } else {
@@ -95,7 +99,7 @@ impl StableDiffusionVersion {
 
     fn vae_file(&self, use_f16: bool) -> &'static str {
         match self {
-            Self::V1_5 | Self::V2_1 | Self::Xl | Self::XL_Turbo => {
+            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
                 if use_f16 {
                     "vae/diffusion_pytorch_model.fp16.safetensors"
                 } else {
@@ -107,7 +111,7 @@ impl StableDiffusionVersion {
 
     fn clip_file(&self, use_f16: bool) -> &'static str {
         match self {
-            Self::V1_5 | Self::V2_1 | Self::Xl | Self::XL_Turbo => {
+            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
                 if use_f16 {
                     "text_encoder/model.fp16.safetensors"
                 } else {
@@ -119,7 +123,7 @@ impl StableDiffusionVersion {
 
     fn clip2_file(&self, use_f16: bool) -> &'static str {
         match self {
-            Self::V1_5 | Self::V2_1 | Self::Xl | Self::XL_Turbo => {
+            Self::V1_5 | Self::V2_1 | Self::XL | Self::XL_Turbo => {
                 if use_f16 {
                     "text_encoder_2/model.fp16.safetensors"
                 } else {
@@ -137,6 +141,7 @@ impl ModelFile {
         version: StableDiffusionVersion,
         use_f16: bool,
     ) -> Result<std::path::PathBuf> {
+        let here = current_dir()?.join("models");
         use hf_hub::api::sync::Api;
         match filename {
             Some(filename) => Ok(std::path::PathBuf::from(filename)),
@@ -145,12 +150,12 @@ impl ModelFile {
                     Self::Tokenizer => {
                         let tokenizer_repo = match version {
                             StableDiffusionVersion::V1_5 => {
-                                "openai/clip-vit-base-patch32"
+                                return Ok(here.join("standard-v1.5-tokenizer.json"));
                             }
                             StableDiffusionVersion::V2_1 => {
                                 "openai/clip-vit-base-patch32"
                             }
-                            StableDiffusionVersion::Xl => {
+                            StableDiffusionVersion::XL => {
                                 "openai/clip-vit-large-patch14"
                             }
                             StableDiffusionVersion::XL_Turbo => {
@@ -162,23 +167,29 @@ impl ModelFile {
                     Self::Tokenizer2 => {
                         ("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", "tokenizer.json")
                     }
-                    Self::Clip => (version.repo(), version.clip_file(use_f16)),
+                    Self::Clip => match version {
+                        StableDiffusionVersion::V1_5 => { return Ok(here.join("standard-v1.5-clip.safetensors")); }
+                        StableDiffusionVersion::V2_1 => { (version.repo(), version.clip_file(use_f16)) }
+                        StableDiffusionVersion::XL => { (version.repo(), version.clip_file(use_f16)) }
+                        StableDiffusionVersion::XL_Turbo => { (version.repo(), version.clip_file(use_f16)) }
+                    },
                     Self::Clip2 => (version.repo(), version.clip2_file(use_f16)),
-                    Self::Unet => (version.repo(), version.unet_file(use_f16)),
+                    Self::Unet => match version {
+                        StableDiffusionVersion::V1_5 => { return Ok(here.join("standard-v1.5-unet-f32.safetensors")); }
+                        StableDiffusionVersion::V2_1 => { (version.repo(), version.unet_file(use_f16)) }
+                        StableDiffusionVersion::XL => { (version.repo(), version.unet_file(use_f16)) }
+                        StableDiffusionVersion::XL_Turbo => { (version.repo(), version.unet_file(use_f16)) }
+                    },
                     Self::Vae => {
                         // Override for SDXL when using f16 weights.
                         // See https://github.com/huggingface/candle/issues/1060
-                        if matches!(
-                            version,
-                            StableDiffusionVersion::Xl | StableDiffusionVersion::XL_Turbo,
-                        ) && use_f16
-                        {
-                            (
+                        match version {
+                            StableDiffusionVersion::V1_5 => { return Ok(here.join("standard-v1.5-vae-f32.safetensors")); }
+                            StableDiffusionVersion::XL | StableDiffusionVersion::XL_Turbo => (
                                 "madebyollin/sdxl-vae-fp16-fix",
                                 "diffusion_pytorch_model.safetensors",
-                            )
-                        } else {
-                            (version.repo(), version.vae_file(use_f16))
+                            ),
+                            _ => (version.repo(), version.vae_file(use_f16))
                         }
                     }
                 };
@@ -422,7 +433,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         None => match sd_version {
             StableDiffusionVersion::V1_5 => 7.5,
             StableDiffusionVersion::V2_1 => 7.5,
-            StableDiffusionVersion::Xl => 7.5,
+            StableDiffusionVersion::XL => 7.5,
             StableDiffusionVersion::XL_Turbo => 0.,
         },
     };
@@ -431,7 +442,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         None => match sd_version {
             StableDiffusionVersion::V1_5 => 30,
             StableDiffusionVersion::V2_1 => 30,
-            StableDiffusionVersion::Xl => 30,
+            StableDiffusionVersion::XL => 30,
             StableDiffusionVersion::XL_Turbo => 1,
         },
     };
@@ -443,7 +454,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         StableDiffusionVersion::V2_1 => {
             stable_diffusion::StableDiffusionConfig::v2_1(sliced_attention_size, height, width)
         }
-        StableDiffusionVersion::Xl => {
+        StableDiffusionVersion::XL => {
             stable_diffusion::StableDiffusionConfig::sdxl(sliced_attention_size, height, width)
         }
         StableDiffusionVersion::XL_Turbo => stable_diffusion::StableDiffusionConfig::sdxl_turbo(
@@ -461,7 +472,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     let use_guide_scale = guidance_scale > 1.0;
 
     let which = match sd_version {
-        StableDiffusionVersion::Xl | StableDiffusionVersion::XL_Turbo => vec![true, false],
+        StableDiffusionVersion::XL | StableDiffusionVersion::XL_Turbo => vec![true, false],
         _ => vec![true],
     };
     let text_embeddings = which
@@ -510,7 +521,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     let vae_scale = match sd_version {
         StableDiffusionVersion::V1_5
         | StableDiffusionVersion::V2_1
-        | StableDiffusionVersion::Xl => 0.18215,
+        | StableDiffusionVersion::XL => 0.18215,
         StableDiffusionVersion::XL_Turbo => 0.13025,
     };
 

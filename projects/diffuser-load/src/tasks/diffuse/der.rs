@@ -3,12 +3,12 @@ use super::*;
 
 
 impl<'de> Deserialize<'de> for DiffuseTask {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error> where D: Deserializer<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let mut config = DiffuseTask::default();
         deserializer.deserialize_any(DiffuserTaskVisitor { place: &mut config })?;
         Ok(config)
     }
-    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> std::result::Result<(), D::Error> where D: Deserializer<'de> {
+    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error> where D: Deserializer<'de> {
         deserializer.deserialize_any(DiffuserTaskVisitor { place })
     }
 }

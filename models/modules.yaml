@@ -1,0 +1,31 @@
+models:
+  standard-v1.5:
+    version: V2
+    available: true
+  standard-v2.1:
+    version: V1
+    available: true
+weights:
+  standard-v1.5-tokenizer:
+    remote: https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/tokenizer.json
+    local: standard-v1.5-tokenizer.json
+  standard-v1.5-clip:
+    remote: https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/text_encoder/model.safetensors
+    local: standard-v1.5-clip.safetensors
+  standard-v1.5-unet-f32:
+    remote:  https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/unet/diffusion_pytorch_model.safetensors
+    local: standard-v1.5-unet-f32.safetensors
+  standard-v1.5-unet-f32:
+    remote:  https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/vae/diffusion_pytorch_model.safetensors
+    local: standard-v1.5-vae-f32.safetensors
+
+
+  tokenizer-xl-part1:
+    remote: https://huggingface.co/openai/clip-vit-large-patch14/resolve/main/tokenizer.json
+    local: standard-tokenizer.xl-part1.json
+  tokenizer-xl-part2:
+    remote: https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/resolve/main/tokenizer.json
+    local: standard-tokenizer.xl-part2.json
+
+
+

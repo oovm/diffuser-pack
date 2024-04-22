@@ -15,10 +15,15 @@ edition = "2021"
 url = "2.5.0"
 serde = { version = "1.0.198", optional = true, features = ["derive", "rc"] }
 safetensors = "0.4.3"
+tokenizers = "0.19.1"
 candle-core = "0.4.1"
 candle-transformers = "0.4.1"
 serde-pickle = "1.1.1"
 json5 = "0.4.1"
+
+#[dependencies.diffuser-error]
+#version = "0.0.0"
+#path = "../diffuser-errors"
 
 [dev-dependencies]
 

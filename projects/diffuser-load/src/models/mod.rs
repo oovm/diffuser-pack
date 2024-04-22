@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use candle_transformers::models::stable_diffusion::ddim::{DDIMScheduler, DDIMSchedulerConfig};
+use candle_transformers::models::stable_diffusion::euler_ancestral_discrete::EulerAncestralDiscreteSchedulerConfig;
 use candle_transformers::models::stable_diffusion::StableDiffusionConfig;
 use safetensors::Dtype;
 use url::Url;
@@ -28,7 +30,7 @@ pub struct ModelStorage {
 
 
 pub struct ModelInfo {
-    name: String,
+    id: ModelID,
     version: StableDiffusionVersion,
     clip1: WeightID,
     clip2: WeightID,
@@ -36,24 +38,38 @@ pub struct ModelInfo {
     unet: WeightID,
 }
 
+pub struct ModelID {
+    name: Arc<String>,
+}
 
 pub struct DiffuserTask {
+    model: ModelID,
     width: u32,
     height: u32,
+    scheduler: DiffuserScheduler,
     steps: u32,
+    seed: u64,
+}
+
+pub enum DiffuserScheduler {
+    DDIM(DDIMSchedulerConfig),
+    EulerAncestralDiscrete(EulerAncestralDiscreteSchedulerConfig),
 }
 
 impl ModelInfo {
     pub fn build(&self, task: DiffuserTask) -> candle_core::Result<StableDiffusionConfig> {
         let config = self.version.build(0, task.width as usize, task.height as usize);
-        
+
         config.build_vae();
         config.build_unet();
-        let scheduler = config.build_scheduler(task.steps as usize)?;
-        
+
+
+        let steps= self.version.adapt_steps(task.steps);
+        let scheduler = config.build_scheduler(steps)?;
         
         
     }
+    
 }
 
 

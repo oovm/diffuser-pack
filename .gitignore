@@ -17,3 +17,7 @@ Cargo.lock
 *.pt
 *.pth
 *.pkl
+
+
+stabilityai/
+openai/

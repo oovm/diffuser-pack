@@ -1,60 +1,60 @@
-
-
+use std::fmt::Formatter;
 use candle_transformers::models::stable_diffusion;
 use anyhow::{Error as E, Result};
 use candle_core::{DType, Device, IndexOp, Module, Tensor, D};
 use candle_core::utils::{cuda_is_available, metal_is_available};
+
 use stable_diffusion::vae::AutoEncoderKL;
 use tokenizers::Tokenizer;
 
+mod tasks;
 
-pub struct DiffuserTask {
+pub use crate::tasks::diffuse::DiffuseTask;
+
+
+pub struct DiffuserTaskRunner {
     /// The prompt to be used for image generation.
-    prompt_positive: String,
-    prompt_negative: String,
-    /// Run on CPU rather than on GPU.
-    cpu: bool,
-    /// Enable tracing (generates a trace-timestamp.json file).
-    tracing: bool,
+    pub prompt_positive: String,
+    pub prompt_negative: String,
     /// The height in pixels of the generated image.
-    height: Option<usize>,
+    pub height: usize,
     /// The width in pixels of the generated image.
-    width: Option<usize>,
+    pub width: usize,
     /// The UNet weight file, in .safetensors format.
-    unet_weights: Option<String>,
+    pub unet_weights: Option<String>,
     /// The CLIP weight file, in .safetensors format.
-    clip_weights: Option<String>,
+    pub clip_weights: Option<String>,
     /// The VAE weight file, in .safetensors format.
-    vae_weights: Option<String>,
+    pub vae_weights: Option<String>,
     /// The file specifying the tokenizer to used for tokenization.
-    tokenizer: Option<String>,
+    pub tokenizer: Option<String>,
     /// The size of the sliced attention or 0 for automatic slicing (disabled by default)
-    sliced_attention_size: Option<usize>,
+    pub sliced_attention_size: Option<usize>,
     /// The number of steps to run the diffusion for.
-    n_steps: Option<usize>,
+    pub n_steps: Option<usize>,
     /// The number of samples to generate iteratively.
-    num_samples: usize,
+    pub num_samples: usize,
     /// The numbers of samples to generate simultaneously.
-    bsize: usize,
+    pub batch_size: usize,
     /// The name of the final image to generate.
-    final_image: String,
-    sd_version: StableDiffusionVersion,
+    pub final_image: String,
+    pub sd_version: StableDiffusionVersion,
     /// Generate intermediary images at each step.
-    intermediary_images: bool,
-    use_flash_attn: bool,
-    use_f16: bool,
-    guidance_scale: Option<f64>,
-    img2img: Option<String>,
+    pub intermediary_images: bool,
+    pub use_flash_attn: bool,
+    pub use_f16: bool,
+    pub guidance_scale: Option<f64>,
+    pub img2img: Option<String>,
     /// The strength, indicates how much to transform the initial image. The
     /// value must be between 0 and 1, a value of 1 discards the initial image
     /// information.
-    img2img_strength: f64,
+    pub img2img_strength: f64,
     /// The seed to use when generating random samples.
-    seed: Option<u64>,
+    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StableDiffusionVersion {
+pub enum StableDiffusionVersion {
     V1_5,
     V2_1,
     Xl,
@@ -62,7 +62,7 @@ enum StableDiffusionVersion {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ModelFile {
+pub enum ModelFile {
     Tokenizer,
     Tokenizer2,
     Clip,
@@ -259,6 +259,7 @@ pub fn save_image2<P: AsRef<std::path::Path>>(img: &Tensor, p: P) -> anyhow::Res
     image.save(p).map_err(candle_core::Error::wrap)?;
     Ok(())
 }
+
 #[allow(clippy::too_many_arguments)]
 fn text_embeddings(
     prompt: &str,
@@ -364,7 +365,8 @@ fn image_preprocess<T: AsRef<std::path::Path>>(path: T) -> anyhow::Result<Tensor
         .unsqueeze(0)?;
     Ok(img)
 }
-pub fn device() -> Result<Device> {
+
+pub fn select_device() -> Result<Device> {
     if cuda_is_available() {
         Ok(Device::new_cuda(0)?)
     } else if metal_is_available() {
@@ -383,13 +385,13 @@ pub fn device() -> Result<Device> {
         Ok(Device::Cpu)
     }
 }
-fn run(args: DiffuserTask) -> Result<()> {
-    use tracing_subscriber::prelude::*;
 
-    let DiffuserTask {
+pub fn run(args: DiffuseTask) -> Result<()> {
+    let here = std::env::current_dir()?;
+    println!("Running on {}", here.display());
+    let DiffuseTask {
         prompt_positive: prompt,
         prompt_negative: uncond_prompt,
-        cpu,
         height,
         width,
         n_steps,
@@ -397,12 +399,11 @@ fn run(args: DiffuserTask) -> Result<()> {
         final_image,
         sliced_attention_size,
         num_samples,
-        bsize,
+        batch_size: bsize,
         sd_version,
         clip_weights,
         vae_weights,
         unet_weights,
-        tracing,
         use_f16,
         guidance_scale,
         use_flash_attn,
@@ -453,7 +454,7 @@ fn run(args: DiffuserTask) -> Result<()> {
     };
 
     let scheduler = sd_config.build_scheduler(n_steps)?;
-    let device = candle_examples::device(cpu)?;
+    let device = select_device()?;
     if let Some(seed) = seed {
         device.set_seed(seed)?;
     }
@@ -600,31 +601,3 @@ fn run(args: DiffuserTask) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
-    let args = DiffuserTask {
-        prompt_positive: "A very realistic photo of a rusty robot walking on a sandy beach".to_string(),
-        prompt_negative: "".to_string(),
-        cpu: false,
-        tracing: false,
-        height: None,
-        width: None,
-        unet_weights: None,
-        clip_weights: None,
-        vae_weights: None,
-        tokenizer: None,
-        sliced_attention_size: None,
-        n_steps: None,
-        num_samples: 0,
-        bsize: 0,
-        final_image: "".to_string(),
-        sd_version: StableDiffusionVersion::V1_5,
-        intermediary_images: false,
-        use_flash_attn: false,
-        use_f16: false,
-        guidance_scale: None,
-        img2img: None,
-        img2img_strength: 0.0,
-        seed: None,
-    };
-    run(args)
-}

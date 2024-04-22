@@ -13,7 +13,7 @@ edition = "2021"
 
 [dependencies]
 url = "2.5.0"
-serde = { version = "1.0.198", optional = true, features = ["derive", "rc"] }
+serde = { version = "1.0.198" }
 safetensors = "0.4.3"
 tokenizers = "0.19.1"
 candle-core = "0.4.1"
@@ -23,7 +23,7 @@ tracing = "0.1.40"
 anyhow = "1.0.82"
 image = "0.25.1"
 tracing-subscriber = "0.3.18"
-hf-hub = "0.3.2"
+hf-hub = { version = "0.3.2" }
 
 #[dependencies.diffuser-error]
 #version = "0.0.0"
@@ -33,4 +33,5 @@ hf-hub = "0.3.2"
 [dev-dependencies]
 
 [features]
-default = []
+default = ["cuda"]
+cuda = ["candle-core/cuda", "candle-transformers/cuda"]

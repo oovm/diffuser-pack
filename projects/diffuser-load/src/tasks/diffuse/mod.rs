@@ -16,8 +16,6 @@ pub struct DiffuseTask {
     pub width: usize,
     /// 图像的高度, 需要是 32 的倍数
     pub height: usize,
-    /// The size of the sliced attention or 0 for automatic slicing (disabled by default)
-    pub sliced_attention_size: usize,
     /// The number of steps to run the diffusion for.
     pub n_steps: Option<usize>,
     /// The numbers of samples to generate simultaneously.
@@ -46,7 +44,6 @@ impl Default for DiffuseTask {
             negative_prompt: "".to_string(),
             height: 512,
             width: 512,
-            sliced_attention_size: 0,
             n_steps: None,
             batch_size: NON_ZERO_ONE,
             model: "standard-v1.5-f32".to_string(),

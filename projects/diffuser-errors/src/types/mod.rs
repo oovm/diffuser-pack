@@ -133,7 +133,7 @@ impl ModelStorage {
         }
         else {
             Err(DiffuserError::custom(format!(
-                "权重文件 `{}` 不存在, 使用 `diffuser download {}` 下载",
+                "权重文件 `{}` 不存在, 尝试使用 `diffuser download {}` 下载",
                 local.display(),
                 weight
             )))
@@ -148,15 +148,14 @@ impl ModelStorage {
     pub fn load_config(
         &self,
         version: &ModelVersion,
-        attention_size: usize,
         width: usize,
         height: usize,
     ) -> StableDiffusionConfig {
         match version {
-            ModelVersion::V1_5 { .. } => StableDiffusionConfig::v1_5(Some(attention_size), Some(height), Some(width)),
-            ModelVersion::V2_1 { .. } => StableDiffusionConfig::v2_1(Some(attention_size), Some(height), Some(width)),
-            ModelVersion::XL { .. } => StableDiffusionConfig::sdxl(Some(attention_size), Some(height), Some(width)),
-            ModelVersion::XL_Turbo { .. } => StableDiffusionConfig::sdxl_turbo(Some(attention_size), Some(height), Some(width)),
+            ModelVersion::V1_5 { .. } => StableDiffusionConfig::v1_5(None, Some(height), Some(width)),
+            ModelVersion::V2_1 { .. } => StableDiffusionConfig::v2_1(None, Some(height), Some(width)),
+            ModelVersion::XL { .. } => StableDiffusionConfig::sdxl(None, Some(height), Some(width)),
+            ModelVersion::XL_Turbo { .. } => StableDiffusionConfig::sdxl_turbo(None, Some(height), Some(width)),
         }
     }
 

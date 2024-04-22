@@ -189,7 +189,7 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
         height,
         width,
         n_steps,
-        sliced_attention_size,
+
         // num_samples,
         batch_size,
         model,
@@ -203,7 +203,7 @@ pub fn run(args: DiffuseTask, out: &Path) -> Result<(), DiffuserError> {
 
     let store = ModelStorage::load(&here)?;
     let sd_version = store.load_version(&model)?;
-    let sd_config = store.load_config(&sd_version, sliced_attention_size, width, height);
+    let sd_config = store.load_config(&sd_version, width, height);
     let runner = DiffuseRunner::load(&sd_version, &sd_config, &store)?;
 
     let batch_size = batch_size.get();

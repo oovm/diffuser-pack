@@ -1,12 +1,9 @@
-use std::env::{current_dir, current_exe};
-use std::fmt::Formatter;
-use std::fs::create_dir;
+use std::env::{current_dir};
 use std::path::{Path, PathBuf};
 use candle_transformers::models::stable_diffusion;
 use anyhow::{Error as E, Result};
 use candle_core::{DType, Device, IndexOp, Module, Tensor, D};
 use candle_core::utils::{cuda_is_available, metal_is_available};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use stable_diffusion::vae::AutoEncoderKL;
 use tokenizers::Tokenizer;
@@ -59,8 +56,6 @@ pub struct DiffuserTaskRunner {
 }
 
 
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelFile {
     Tokenizer,
@@ -70,7 +65,6 @@ pub enum ModelFile {
     Unet,
     Vae,
 }
-
 
 
 impl ModelFile {
@@ -138,7 +132,7 @@ fn output_filename(
     sample_idx: usize,
     num_samples: usize,
     timestep_idx: Option<usize>,
-) -> String {
+) -> PathBuf {
     let filename = if num_samples > 1 {
         match basename.rsplit_once('.') {
             None => format!("{basename}.{sample_idx}.png"),
@@ -149,7 +143,7 @@ fn output_filename(
     } else {
         basename.to_string()
     };
-    match timestep_idx {
+    let filepath = match timestep_idx {
         None => filename,
         Some(timestep_idx) => match filename.rsplit_once('.') {
             None => format!("{filename}-{timestep_idx}.png"),
@@ -157,7 +151,8 @@ fn output_filename(
                 format!("{filename_no_extension}-{timestep_idx}.{extension}")
             }
         },
-    }
+    };
+    PathBuf::from(filepath)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -165,30 +160,27 @@ fn save_image(
     vae: &AutoEncoderKL,
     latents: &Tensor,
     vae_scale: f64,
-    bsize: usize,
-    idx: usize,
+    batch_size: usize,
     final_image: &str,
-    num_samples: usize,
     timestep_ids: Option<usize>,
 ) -> Result<()> {
     let images = vae.decode(&(latents / vae_scale)?)?;
     let images = ((images / 2.)? + 0.5)?.to_device(&Device::Cpu)?;
     let images = (images.clamp(0f32, 1.)? * 255.)?.to_dtype(DType::U8)?;
-    for batch in 0..bsize {
+    for batch in 0..batch_size {
         let image = images.i(batch)?;
         let image_filename = output_filename(
             final_image,
-            (bsize * idx) + batch + 1,
-            batch + num_samples,
+            (batch_size * 0) + batch + 1,
+            batch + 1,
             timestep_ids,
         );
-        save_image2(&image, image_filename)?;
+        save_image_raw(&image, &image_filename)?;
     }
     Ok(())
 }
 
-pub fn save_image2<P: AsRef<std::path::Path>>(img: &Tensor, p: P) -> anyhow::Result<()> {
-    let p = p.as_ref();
+pub fn save_image_raw(img: &Tensor, path: &Path) -> anyhow::Result<()> {
     let (channel, height, width) = img.dims3()?;
     if channel != 3 {
         anyhow::bail!("save_image expects an input of shape (3, height, width)")
@@ -198,9 +190,9 @@ pub fn save_image2<P: AsRef<std::path::Path>>(img: &Tensor, p: P) -> anyhow::Res
     let image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
         match image::ImageBuffer::from_raw(width as u32, height as u32, pixels) {
             Some(image) => image,
-            None => anyhow::bail!("error saving image {p:?}"),
+            None => anyhow::bail!("error saving image {}", path.display()),
         };
-    image.save(p).map_err(candle_core::Error::wrap)?;
+    image.save(path).map_err(candle_core::Error::wrap)?;
     Ok(())
 }
 
@@ -288,7 +280,7 @@ fn text_embeddings(
     Ok(text_embeddings)
 }
 
-fn image_preprocess<T: AsRef<std::path::Path>>(path: T) -> anyhow::Result<Tensor> {
+fn image_preprocess<T: AsRef<std::path::Path>>(path: T) -> Result<Tensor> {
     let img = image::io::Reader::open(path)?.decode()?;
     let (height, width) = (img.height() as usize, img.width() as usize);
     let height = height - height % 32;
@@ -339,7 +331,7 @@ pub fn run(args: DiffuseTask) -> Result<()> {
         n_steps,
         final_image,
         sliced_attention_size,
-        num_samples,
+        // num_samples,
         batch_size,
         sd_version,
         use_f16,
@@ -445,96 +437,90 @@ pub fn run(args: DiffuseTask) -> Result<()> {
     };
 
     let vae_scale = match sd_version {
-        ModelVersion::V1_5
-        | ModelVersion::V2_1
-        | ModelVersion::XL => 0.18215,
+        ModelVersion::V1_5 => 0.18215,
+        ModelVersion::V2_1 => 0.18215,
+        ModelVersion::XL => 0.18215,
         ModelVersion::XL_Turbo => 0.13025,
     };
 
-    for idx in 0..num_samples {
-        let timesteps = scheduler.timesteps();
-        let latents = match &init_latent_dist {
-            Some(init_latent_dist) => {
-                let latents = (init_latent_dist.sample()? * vae_scale)?.to_device(&device)?;
-                if t_start < timesteps.len() {
-                    let noise = latents.randn_like(0f64, 1f64)?;
-                    scheduler.add_noise(&latents, noise, timesteps[t_start])?
-                } else {
-                    latents
-                }
-            }
-            None => {
-                let latents = Tensor::randn(
-                    0f32,
-                    1f32,
-                    (bsize, 4, sd_config.height / 8, sd_config.width / 8),
-                    &device,
-                )?;
-                // scale the initial noise by the standard deviation required by the scheduler
-                (latents * scheduler.init_noise_sigma())?
-            }
-        };
-        let mut latents = latents.to_dtype(dtype)?;
-
-        println!("starting sampling");
-        for (timestep_index, &timestep) in timesteps.iter().enumerate() {
-            if timestep_index < t_start {
-                continue;
-            }
-            let start_time = std::time::Instant::now();
-            let latent_model_input = if use_guide_scale {
-                Tensor::cat(&[&latents, &latents], 0)?
+    let timesteps = scheduler.timesteps();
+    let latents = match &init_latent_dist {
+        Some(init_latent_dist) => {
+            let latents = (init_latent_dist.sample()? * vae_scale)?.to_device(&device)?;
+            if t_start < timesteps.len() {
+                let noise = latents.randn_like(0f64, 1f64)?;
+                scheduler.add_noise(&latents, noise, timesteps[t_start])?
             } else {
-                latents.clone()
-            };
-
-            let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)?;
-            let noise_pred =
-                unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
-
-            let noise_pred = if use_guide_scale {
-                let noise_pred = noise_pred.chunk(2, 0)?;
-                let (noise_pred_uncond, noise_pred_text) = (&noise_pred[0], &noise_pred[1]);
-
-                (noise_pred_uncond + ((noise_pred_text - noise_pred_uncond)? * guidance_scale)?)?
-            } else {
-                noise_pred
-            };
-
-            latents = scheduler.step(&noise_pred, timestep, &latents)?;
-            let dt = start_time.elapsed().as_secs_f32();
-            println!("step {}/{n_steps} done, {:.2}s", timestep_index + 1, dt);
-
-            if args.intermediary_images {
-                save_image(
-                    &vae,
-                    &latents,
-                    vae_scale,
-                    bsize,
-                    idx,
-                    &final_image,
-                    num_samples,
-                    Some(timestep_index + 1),
-                )?;
+                latents
             }
         }
+        None => {
+            let latents = Tensor::randn(
+                0f32,
+                1f32,
+                (bsize, 4, sd_config.height / 8, sd_config.width / 8),
+                &device,
+            )?;
+            // scale the initial noise by the standard deviation required by the scheduler
+            (latents * scheduler.init_noise_sigma())?
+        }
+    };
+    let mut latents = latents.to_dtype(dtype)?;
 
-        println!(
-            "Generating the final image for sample {}/{}.",
-            idx + 1,
-            num_samples
-        );
-        save_image(
-            &vae,
-            &latents,
-            vae_scale,
-            bsize,
-            idx,
-            &final_image,
-            num_samples,
-            None,
-        )?;
+    println!("starting sampling");
+    for (timestep_index, &timestep) in timesteps.iter().enumerate() {
+        if timestep_index < t_start {
+            continue;
+        }
+        let start_time = std::time::Instant::now();
+        let latent_model_input = if use_guide_scale {
+            Tensor::cat(&[&latents, &latents], 0)?
+        } else {
+            latents.clone()
+        };
+
+        let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)?;
+        let noise_pred =
+            unet.forward(&latent_model_input, timestep as f64, &text_embeddings)?;
+
+        let noise_pred = if use_guide_scale {
+            let noise_pred = noise_pred.chunk(2, 0)?;
+            let (noise_pred_uncond, noise_pred_text) = (&noise_pred[0], &noise_pred[1]);
+
+            (noise_pred_uncond + ((noise_pred_text - noise_pred_uncond)? * guidance_scale)?)?
+        } else {
+            noise_pred
+        };
+
+        latents = scheduler.step(&noise_pred, timestep, &latents)?;
+        let dt = start_time.elapsed().as_secs_f32();
+        println!("step {}/{n_steps} done, {:.2}s", timestep_index + 1, dt);
+
+        if args.intermediary_images {
+            save_image(
+                &vae,
+                &latents,
+                vae_scale,
+                bsize,
+                &final_image,
+                Some(timestep_index + 1),
+            )?;
+        }
     }
+
+    println!(
+        "Generating the final image for sample {}",
+        0 + 1,
+        1
+    );
+    save_image(
+        &vae,
+        &latents,
+        vae_scale,
+        bsize,
+        &final_image,
+        None,
+    )?;
     Ok(())
 }
 

@@ -22,8 +22,6 @@ pub struct DiffuseTask {
     pub sliced_attention_size: Option<usize>,
     /// The number of steps to run the diffusion for.
     pub n_steps: Option<usize>,
-    /// The number of samples to generate iteratively.
-    pub num_samples: usize,
     /// The numbers of samples to generate simultaneously.
     pub batch_size: NonZeroUsize,
     /// The name of the final image to generate.
@@ -56,13 +54,12 @@ impl Default for DiffuseTask {
             width: 512,
             sliced_attention_size: None,
             n_steps: None,
-            num_samples: 1,
             batch_size: NON_ZERO_ONE,
             final_image: "test.png".to_string(),
             sd_version: ModelVersion::V1_5,
             intermediary_images: false,
             use_flash_attn: false,
-            use_f16: false,
+            use_f16: true,
             guidance_scale: None,
             img2img: None,
             img2img_strength: 0.0,

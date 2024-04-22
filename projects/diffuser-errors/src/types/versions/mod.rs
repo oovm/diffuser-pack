@@ -15,3 +15,14 @@ pub enum ModelVersion {
     XL_Turbo,
 }
 
+
+impl ModelVersion {
+    pub fn vae_scale(&self) -> f32 {
+        match self {
+            Self::V1_5 => 0.18215,
+            Self::V2_1 => 0.18215,
+            Self::XL => 0.18215,
+            Self::XL_Turbo => 0.13025,
+        }
+    }
+}

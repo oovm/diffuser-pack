@@ -33,5 +33,6 @@ features = []
 [dev-dependencies]
 
 [features]
-default = ["cuda"]
+default = ["cuda", "cudnn"]
 cuda = ["candle-core/cuda", "candle-transformers/cuda"]
+cudnn = ["candle-core/cudnn"]

@@ -18,12 +18,17 @@ safetensors = "0.4.3"
 tokenizers = "0.19.1"
 candle-core = "0.4.1"
 candle-transformers = "0.4.1"
-serde-pickle = "1.1.1"
 json5 = "0.4.1"
+tracing = "0.1.40"
+anyhow = "1.0.82"
+image = "0.25.1"
+tracing-subscriber = "0.3.18"
+hf-hub = "0.3.2"
 
 #[dependencies.diffuser-error]
 #version = "0.0.0"
 #path = "../diffuser-errors"
+#features = ["candle-core"]
 
 [dev-dependencies]
 

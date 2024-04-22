@@ -6,36 +6,15 @@ use candle_transformers::models::stable_diffusion::euler_ancestral_discrete::Eul
 use candle_transformers::models::stable_diffusion::StableDiffusionConfig;
 use safetensors::Dtype;
 use url::Url;
-use crate::StableDiffusionVersion;
-
-pub struct StableDiffusionXLF32 {
-    name: String,
-    clip1: WeightInfo,
-    clip2: WeightInfo,
-    vae: WeightInfo,
-    unet: WeightInfo,
-}
-
-pub struct StableDiffusionV21F32 {
-    name: String,
-    clip1: WeightInfo,
-    clip2: WeightInfo,
-    vae: WeightInfo,
-    unet: WeightInfo,
-}
-
-pub struct ModelStorage {
-    pub weights: BTreeMap<WeightID, WeightInfo>,
-}
+use crate::ModelVersion;
+use candle_core::{Error, Result};
+use candle_transformers::models::stable_diffusion::vae::AutoEncoderKL;
 
 
 pub struct ModelInfo {
     id: ModelID,
-    version: StableDiffusionVersion,
-    clip1: WeightID,
-    clip2: WeightID,
-    vae: WeightID,
-    unet: WeightID,
+    version: ModelVersion,
+
 }
 
 pub struct ModelID {
@@ -43,33 +22,55 @@ pub struct ModelID {
 }
 
 pub struct DiffuserTask {
-    model: ModelID,
-    width: u32,
-    height: u32,
-    scheduler: DiffuserScheduler,
-    steps: u32,
-    seed: u64,
+    pub model: ModelID,
+    pub width: u32,
+    pub height: u32,
+    pub steps: u32,
+    pub seed: u64,
+    pub prompt_positive: String,
+    pub prompt_negative: String,
 }
 
-pub enum DiffuserScheduler {
-    DDIM(DDIMSchedulerConfig),
-    EulerAncestralDiscrete(EulerAncestralDiscreteSchedulerConfig),
+pub struct DiffuserTaskRunner {
+    model: ModelInfo,
+    config: DiffuserTask,
+    vae: AutoEncoderKL,
+}
+
+impl DiffuserTask {
+    pub fn build(&self, config: &ModelStorage) -> Result<DiffuserTaskRunner> {
+        let model = ModelInfo { id: ModelID { name: Arc::new("".to_string()) }, version: () };
+        let mut config = self.clone();
+
+        model.version.adapt_vae();
+        
+        DiffuserTaskRunner {
+            model: ModelInfo { id: ModelID { name: Arc::new("".to_string()) }, version: () },
+            config: self,
+            vae: (),
+        }
+    }
 }
 
 impl ModelInfo {
     pub fn build(&self, task: DiffuserTask) -> candle_core::Result<StableDiffusionConfig> {
-        let config = self.version.build(0, task.width as usize, task.height as usize);
-
-        config.build_vae();
-        config.build_unet();
+        let config = self.version.adapt_config(0, task.width as usize, task.height as usize);
 
 
-        let steps= self.version.adapt_steps(task.steps);
+        let steps = self.version.adapt_steps(task.steps);
         let scheduler = config.build_scheduler(steps)?;
-        
-        
     }
-    
+}
+
+
+pub struct ModelStorage {
+    pub weights: BTreeMap<WeightID, WeightInfo>,
+}
+
+impl ModelStorage {
+    pub fn get_local_weight(&self, id: WeightID) -> Result<PathBuf> {
+        Err(Error::Msg("todo".to_string()))
+    }
 }
 
 

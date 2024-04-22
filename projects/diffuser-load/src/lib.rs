@@ -1,7 +1,9 @@
 mod errors;
 mod models;
+mod versions;
 
-pub use errors::{Error, Result};
+pub use crate::errors::{Error, Result};
+pub use crate::versions::StableDiffusionVersion;
 
 // mod load_pickle;
 // pub use crate::load_pickle::load_pth;
